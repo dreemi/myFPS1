@@ -320,10 +320,11 @@ int main() {
                 DrawModel(ground, { 0, 0, 0 }, 1.0f, WHITE);
                 for (const WorldBox& b : world) if (!b.isTarget) DrawWorldBox(b, materials);
             }
-            for (const SpawnPoint& s : spawns) DrawModel(spawnPad, { s.position.x, 0.0f, s.position.z }, 1.0f, s.color);
             drawTargets();
             for (const Enemy& e : enemies) e.Draw(&character);
             drawPlayerBody(PART_LEGS);
+            for (const SpawnPoint& s : spawns)
+                Fx::DrawGroundMarker(s.position, 1.3f, s.yaw, { s.color.r, s.color.g, s.color.b, 170 });
             Fx::Draw(cam);
         Render::EndWorldPass();
 

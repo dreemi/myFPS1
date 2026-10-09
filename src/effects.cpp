@@ -7,7 +7,7 @@
 
 namespace Fx {
 
-enum class Tex { Soft, Flash, Hole, Spark };
+enum class Tex { Soft, Flash, Hole, Spark, Ring };
 enum class Blend { Alpha, Additive };
 
 struct Particle {
@@ -33,7 +33,7 @@ struct TracerFx {
     Color color;
 };
 
-static Texture2D textures[4];
+static Texture2D textures[5];
 static std::vector<Particle> particles;
 static std::vector<Decal> decals;
 static std::vector<TracerFx> tracers;
@@ -114,6 +114,17 @@ static Texture2D MakeHoleTexture(int size) {
     return t;
 }
 
+static float RingAlpha(float u, float v) {
+    // A worn painted ring with a chevron pointing "up" the texture (+v is forward)
+    float r = sqrtf(u * u + v * v);
+    float ring = (r > 0.80f && r < 0.92f) ? 0.85f : 0.0f;
+    float chevron = 0.0f;
+    float y = -v, x = fabsf(u);                    // texture up = forward
+    if (y > -0.25f && y < 0.45f && fabsf((0.45f - y) * 0.75f - x) < 0.07f) chevron = 0.8f;
+    float wear = 0.75f + 0.25f * sinf(u * 37.0f) * sinf(v * 29.0f + 1.3f); // scuffed paint
+    return fmaxf(ring, chevron) * wear;
+}
+
 static float SparkAlpha(float u, float v) {
     // Long thin glow (stretched along the texture's x axis when drawn)
     return powf(fmaxf(0.0f, 1.0f - fabsf(v) * 1.0f), 3.0f) * powf(fmaxf(0.0f, 1.0f - fabsf(u)), 1.0f);
@@ -124,6 +135,7 @@ bool Init() {
     textures[(int)Tex::Flash] = MakeTexture(128, FlashAlpha, WHITE);
     textures[(int)Tex::Hole] = MakeHoleTexture(64);
     textures[(int)Tex::Spark] = MakeTexture(32, SparkAlpha, WHITE);
+    textures[(int)Tex::Ring] = MakeTexture(256, RingAlpha, WHITE);
     ready = true;
     return true;
 }
@@ -330,6 +342,22 @@ void Draw(const Camera3D& cam) {
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     rlEnableBackfaceCulling();
+}
+
+void DrawGroundMarker(Vector3 position, float radius, float yaw, Color color) {
+    if (!ready) return;
+    rlDrawRenderBatchActive();
+    rlDisableDepthMask();
+    BeginBlendMode(BLEND_ALPHA);
+    Vector3 f = { sinf(yaw) * radius, 0, cosf(yaw) * radius };   // texture up
+    Vector3 r = { -cosf(yaw) * radius, 0, sinf(yaw) * radius };  // texture right
+    Vector3 p = { position.x, 0.012f, position.z };
+    // Corners: bottom-left, bottom-right, top-right, top-left (seen from above)
+    Quad(textures[(int)Tex::Ring], Vector3Subtract(Vector3Subtract(p, r), f), Vector3Subtract(Vector3Add(p, r), f),
+         Vector3Add(Vector3Add(p, r), f), Vector3Add(Vector3Subtract(p, r), f), color);
+    EndBlendMode();
+    rlDrawRenderBatchActive();
+    rlEnableDepthMask();
 }
 
 void DrawFlashSprite(const Camera3D& cam, Vector3 position, float size, float rotation, float alpha) {

@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
-static const char* ANIM_NAMES[(int)CharAnim::Count] = { "idle", "walk", "run", "crouch", "crouch_walk", "fp_hold" };
+static const char* ANIM_NAMES[(int)CharAnim::Count] = { "idle", "walk", "run", "crouch", "crouch_walk", "fp_hold", "rest" };
 
 bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
     std::string dir = assetDir + "models/character/";

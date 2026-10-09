@@ -359,6 +359,7 @@ def make_action(name, frames, pose):
 
 
 make_action("idle", 2, lambda ph, f: (aim_pose(),))
+make_action("rest", 2, lambda ph, f: None)  # arms down, nothing held (for bodies)
 make_action("walk", 32, lambda ph, f: (legs(ph, 0.32, 0.10, 0.0, 0.015), aim_pose()))
 make_action("run", 20, lambda ph, f: (legs(ph, 0.55, 0.22, 0.04, 0.03), lean(10), aim_pose()))
 make_action("crouch", 2, lambda ph, f: (legs(0.0, 0.0, 0.0, CROUCH_DROP, 0.0), lean(15), aim_pose()))

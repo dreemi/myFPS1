@@ -15,10 +15,24 @@ static const Color BRASS = { 206, 168, 92, 255 };
 
 static Font font{};
 static bool ownFont = false;
+static Texture2D vignette{};
 
 Font UiFont() { return font; }
 
 bool Init() {
+    // Soft dark corners (drawn over the 3D view, under the HUD)
+    Image img = GenImageColor(256, 144, BLANK);
+    Color* px = (Color*)img.data;
+    for (int y = 0; y < 144; y++)
+        for (int x = 0; x < 256; x++) {
+            float u = (x + 0.5f) / 256 * 2 - 1, v = (y + 0.5f) / 144 * 2 - 1;
+            float d = sqrtf(u * u * 0.8f + v * v);
+            px[y * 256 + x] = { 0, 0, 0, (unsigned char)(255 * Clamp((d - 0.55f) / 0.9f, 0.0f, 1.0f) * 0.55f) };
+        }
+    vignette = LoadTextureFromImage(img);
+    UnloadImage(img);
+    SetTextureFilter(vignette, TEXTURE_FILTER_BILINEAR);
+
     // Bahnschrift ships with Windows 10+; read it from the system at runtime
     const char* candidates[] = { "C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeui.ttf" };
     for (const char* path : candidates) {
@@ -37,6 +51,7 @@ bool Init() {
 }
 
 void Shutdown() {
+    if (vignette.id) UnloadTexture(vignette);
     if (ownFont) UnloadFont(font);
     ownFont = false;
 }
@@ -268,6 +283,9 @@ static void DeathScreen(const State& s) {
 }
 
 void Draw(const State& s) {
+    if (vignette.id)
+        DrawTexturePro(vignette, { 0, 0, (float)vignette.width, (float)vignette.height }, { 0, 0, (float)s.screenW, (float)s.screenH },
+                       { 0, 0 }, 0, WHITE);
     if (!s.started) { TitleScreen(s); return; }
 
     Vignette(s);

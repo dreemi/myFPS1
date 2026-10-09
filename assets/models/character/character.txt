@@ -11,7 +11,7 @@ mesh 8 torso torso_body
 mesh 9 torso torso_suit
 mesh 10 upperarms upperarms_body
 mesh 11 upperarms upperarms_suit
-# animations: crouch crouch_walk fp_hold idle run walk
+# animations: crouch crouch_walk fp_hold idle rest run walk
 # right-hand grip point (palm centre), model space (Y up, facing +Z), meters
 aim_grip -0.0186 1.3616 0.4972
 aim_hand -0.0400 1.3968 0.4456

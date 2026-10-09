@@ -8,7 +8,7 @@
 // (hips and legs, seen when looking down), and for the first-person arms.
 // Model space: meters, Y up, facing +Z, the character's right is -X.
 
-enum class CharAnim { Idle, Walk, Run, Crouch, CrouchWalk, FpHold, Count };
+enum class CharAnim { Idle, Walk, Run, Crouch, CrouchWalk, FpHold, Rest, Count };
 
 // Which parts of the mesh to draw (see tools/export_character.py)
 enum CharPart {
@@ -24,7 +24,7 @@ struct CharacterAssets {
     Model model{};
     ModelAnimation* anims = nullptr;
     int animCount = 0;
-    int animIndex[(int)CharAnim::Count] = { -1, -1, -1, -1, -1, -1 };
+    int animIndex[(int)CharAnim::Count] = { -1, -1, -1, -1, -1, -1, -1 };
     std::vector<int> meshPart;   // CharPart of each mesh
     Vector3 aimGrip{};           // right palm centre in the idle (aiming) pose
     Vector3 fpGrip{};            // right palm centre in the first-person hold pose

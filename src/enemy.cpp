@@ -399,11 +399,11 @@ void Enemy::Draw(CharacterAssets* character) const {
         } else {
             float t = respawnDelay - respawnTimer;       // seconds since death
             float fall = fminf(1.0f, t / 0.55f);
-            tilt = 86.0f * fall * fall;                  // accelerate into the ground
+            tilt = 90.0f * fall * fall;                  // accelerate into the ground
             if (t > 0.55f && t < 0.75f) tilt -= 6.0f * sinf((t - 0.55f) / 0.2f * PI); // small bounce
-            sink = t > 2.2f ? (t - 2.2f) * 0.6f : 0.0f;  // then sink away before respawning
+            sink = t > 2.0f ? (t - 2.0f) * 1.0f : 0.0f;  // then sink away before respawning
         }
-        CharAnim anim = alive ? GetAnim() : CharAnim::Idle;
+        CharAnim anim = alive ? GetAnim() : CharAnim::Rest; // a body lets go of the gun
         int frame = CharacterFrame(*character, anim, animPhase);
         Matrix toWorld = MatrixRotateY(yawDeg * DEG2RAD);
         if (tilt != 0.0f && Vector3LengthSqr(axis) > 1e-6f) toWorld = MatrixMultiply(toWorld, MatrixRotate(Vector3Normalize(axis), tilt * DEG2RAD));

@@ -93,7 +93,10 @@ void main()
     float gloss = mix(48.0, 6.0, rough);
     float spec = pow(max(dot(N, H), 0.0), gloss) * specular * (1.0 - rough) * ndl;
 
-    vec3 color = albedo * (ambient + sunColor * ndl * shadow) + sunColor * spec * shadow;
+    // Walls darken toward the ground, where little sky light reaches them
+    float contact = 1.0;
+    if (worldMapped == 1 && abs(n.y) < 0.5) contact = mix(0.45, 1.0, smoothstep(0.0, 0.9, fragPosition.y));
+    vec3 color = albedo * (ambient * contact + sunColor * ndl * shadow * mix(0.8, 1.0, contact)) + sunColor * spec * shadow;
 
     for (int i = 0; i < 2; i++) {
         if (lightRadius[i] <= 0.0) continue;
