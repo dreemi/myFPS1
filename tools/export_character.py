@@ -12,7 +12,7 @@ What it does:
     each face follows), so the game can hide parts for the first-person view
   - authors simple animations on the skeleton (no IK constraints; a small two-bone
     solver places arms and legs): idle, walk, run, crouch, crouch_walk (upper body
-    holding a revolver two-handed) and fp_hold (first-person grip + reload)
+    holding a revolver two-handed) and fp_hold (first-person grip, the revolver's reload, aiming)
   - exports character.glb and character.txt (which mesh is which part, grip points)
 
 Blender space: Z up, the character faces -Y, his right side is -X.
@@ -365,32 +365,272 @@ make_action("run", 20, lambda ph, f: (legs(ph, 0.55, 0.22, 0.04, 0.03), lean(10)
 make_action("crouch", 2, lambda ph, f: (legs(0.0, 0.0, 0.0, CROUCH_DROP, 0.0), lean(15), aim_pose()))
 make_action("crouch_walk", 36, lambda ph, f: (legs(ph, 0.22, 0.06, CROUCH_DROP, 0.01), lean(15), aim_pose()))
 
-# First person: the arms only (the game draws them in gun space, with the right
-# palm on the grip). Frames:
-#   0       hip hold
-#   1..30   reload (the support hand drops away and comes back)
-#   31..40  hip hold -> aiming down sights (arms reach forward, elbows out)
+# First person: the arms only. The game draws them with the right palm on the
+# revolver's grip. Frames:
+#   0        hip hold
+#   1..90    reload, 3 s (see below)
+#   91..100  hip hold -> aiming down sights (arms reach forward, elbows out)
 # Palm positions match where the viewmodel puts the gun (relative to the eye).
 EYE = None
 FP_HIP_PALM = Vector((-0.19, -0.464, -0.22))   # 19 cm right, 46 cm ahead, 22 cm down
 FP_ADS_PALM = Vector((0.0, -0.404, -0.132))    # centred under the line of sight
+FP_FRAMES = 101
+RELOAD_FIRST, RELOAD_LAST, RELOAD_SECONDS = 1, 90, 3.0
+ADS_FIRST = 91
+
+# The reload. The right hand carries the gun through the handling (the game
+# moves the gun with the hand_r bone in these frames) while the left hand thumbs
+# the latch, swings the cylinder out, punches the ejector rod, fetches a
+# speedloader, loads, spins the cylinder and pushes it shut. Everything is
+# placed relative to where the game draws the gun, so these must match
+# src/weapon_models.cpp (REVOLVER_MODELS) and src/viewmodel.cpp (RELOAD_KEYS).
+GUN_SCALE = 1.3                          # REVOLVER_MODELS.fpScale
+GUN_HIP = Vector((0.19, -0.17, -0.48))   # REVOLVER_MODELS.hipOffset (camera space)
+GUN_HIP_YAW = -4.0                       # REVOLVER_MODELS.hipYawDegrees
+HAND_GRIP = Vector((0.0, -0.05, 0.02))   # REVOLVER_MODELS.handGrip (gun space)
+RELOAD_KEYS = [  # seconds, camera-space offset of the gun (m), pitch, yaw, roll (deg) - as viewmodel.cpp
+    (0.00, 0.000, 0.000, 0.000, 0.0, 0.0, 0.0),
+    (0.18, -0.050, 0.035, 0.050, 6.0, 8.0, -22.0),
+    (0.40, -0.070, 0.055, 0.070, 10.0, 12.0, -38.0),
+    (0.52, -0.060, 0.065, 0.060, 48.0, 8.0, -30.0),
+    (0.64, -0.060, 0.075, 0.070, 56.0, 8.0, -28.0),
+    (0.80, -0.060, 0.055, 0.060, 28.0, 9.0, -30.0),
+    (1.00, -0.120, 0.050, 0.080, -42.0, 20.0, -30.0),
+    (1.42, -0.130, 0.055, 0.090, -48.0, 22.0, -28.0),
+    (1.62, -0.130, 0.055, 0.090, -45.0, 22.0, -28.0),
+    (1.98, -0.120, 0.050, 0.080, -30.0, 18.0, -32.0),
+    (2.28, -0.110, 0.050, 0.080, -8.0, 14.0, -36.0),
+    (2.42, -0.070, 0.030, 0.060, 3.0, 8.0, -14.0),
+    (2.70, -0.010, 0.005, 0.010, 0.0, 2.0, -2.0),
+    (3.00, 0.000, 0.000, 0.000, 0.0, 0.0, 0.0),
+]
+
+
+def reload_curve(t, c):
+    """Channel c of RELOAD_KEYS at time t: a smooth curve through the keys (Catmull-Rom tangents)."""
+    keys = RELOAD_KEYS
+    if t <= keys[0][0]:
+        return keys[0][c + 1]
+    n = len(keys)
+    for i in range(n - 1):
+        a, b = keys[i], keys[i + 1]
+        if t > b[0]:
+            continue
+        h = b[0] - a[0]
+        s = (t - a[0]) / h
+
+        def tangent(j):
+            if j <= 0 or j >= n - 1:
+                return 0.0
+            return (keys[j + 1][c + 1] - keys[j - 1][c + 1]) / (keys[j + 1][0] - keys[j - 1][0])
+        ma, mb = tangent(i) * h, tangent(i + 1) * h
+        s2, s3 = s * s, s * s * s
+        return (2 * s3 - 3 * s2 + 1) * a[c + 1] + (s3 - 2 * s2 + s) * ma + (-2 * s3 + 3 * s2) * b[c + 1] + (s3 - s2) * mb
+    return keys[-1][c + 1]
+
+
+def gun_in_camera(t):
+    """Where the game draws the gun at t seconds into the reload (camera space, no scale)."""
+    k = [reload_curve(t, c) for c in range(6)]
+    return (Matrix.Translation(GUN_HIP + Vector(k[0:3])) @ Matrix.Rotation(math.radians(GUN_HIP_YAW + k[4]), 4, "Y")
+            @ Matrix.Rotation(math.radians(k[3]), 4, "X") @ Matrix.Rotation(math.radians(k[5]), 4, "Z"))
+
+
+MODEL_TO_BLENDER = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))  # glTF (Y up) -> Blender (Z up)
+CAM_TO_BLENDER = None   # set once the hip hold is known
+H0 = L0 = None          # hand_r / hand_l matrices in the hip hold
+LEFT_PALM_SUPPORT = LEFT_NORMAL_SUPPORT = None
+REV = None              # revolver.txt points
+
+
+def read_revolver_rig():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "models", "revolver", "revolver.txt")
+    rig = {}
+    with open(path) as fh:
+        for line in fh:
+            p = line.split()
+            if not p or p[0] in ("#", "mesh"):
+                continue
+            if len(p) == 4:
+                rig[p[0]] = Vector(tuple(float(x) for x in p[1:]))
+            elif len(p) == 2:
+                rig[p[0]] = float(p[1])
+    return rig
+
+
+def palm_center(side):
+    hand, mid = pbones["hand_" + side], pbones["middle_01_" + side]
+    return hand.head * 0.45 + mid.head * 0.55 + palm_normal(side) * 0.025
+
+
+def gun_to_blender(t):
+    """Gun space (game units, as the model is authored) at time t -> Blender armature space."""
+    return CAM_TO_BLENDER @ gun_in_camera(t) @ Matrix.Scale(GUN_SCALE, 4)
+
+
+def gun_motion(t):
+    """The gun's movement from the hip hold to time t, in Blender armature space."""
+    return CAM_TO_BLENDER @ gun_in_camera(t) @ gun_in_camera(0.0).inverted() @ CAM_TO_BLENDER.inverted()
+
+
+def setup_fp():
+    """Pose the hip hold once and work out how game camera space maps onto the armature."""
+    global EYE, CAM_TO_BLENDER, H0, L0, LEFT_PALM_SUPPORT, LEFT_NORMAL_SUPPORT, REV
+    eyes = bpy.data.objects["head_eyes"]
+    EYE = sum((eyes.matrix_world @ v.co for v in eyes.data.vertices), Vector()) / len(eyes.data.vertices)
+    REV = read_revolver_rig()
+    reset()
+    right = EYE + FP_HIP_PALM
+    hold_revolver(right, right + Vector((0.035, 0.0, -0.035)))
+    g = palm_center("r")
+    g0 = Vector((g.x, g.z, -g.y))  # glTF model space
+    # model -> camera, as the viewmodel draws the arms: grip point onto the hand-grip point of the gun
+    model_to_cam = (gun_in_camera(0.0) @ Matrix.Translation(HAND_GRIP * GUN_SCALE) @ Matrix.Rotation(math.pi, 4, "Y")
+                    @ Matrix.Translation(-g0))
+    CAM_TO_BLENDER = MODEL_TO_BLENDER @ model_to_cam.inverted()
+    H0 = pbones["hand_r"].matrix.copy()
+    L0 = pbones["hand_l"].matrix.copy()
+    LEFT_PALM_SUPPORT = palm_center("l")
+    LEFT_NORMAL_SUPPORT = palm_normal("l")
+    reset()
+
+
+def cylinder_open_axis():
+    """The open cylinder's axis point (x, y) in gun space."""
+    p, a = REV["crane_pivot"], REV["cylinder_axis"]
+    ang = math.radians(100.0)  # RevolverRig::craneOpenDegrees
+    v = Vector((a.x - p.x, a.y - p.y))
+    return Vector((p.x + v.x * math.cos(ang) - v.y * math.sin(ang), p.y + v.x * math.sin(ang) + v.y * math.cos(ang)))
+
+
+# Left hand keys: (seconds, space, palm centre, finger direction, palm normal). Space "gun"
+# follows the gun (game gun-space units), "cam" is fixed in camera space (off screen),
+# "support" is the two-handed hold, moving with the gun.
+def left_keys():
+    ax = cylinder_open_axis()
+    rear = REV["cylinder_rear"].z
+    knob = 0.018    # speedloader knob centre behind its rim face (make_revolver.py)
+    ready = 0.040   # speedloader held this far behind the cylinder before going in (viewmodel.cpp)
+    palm_off = 0.022
+    G = "gun"
+    return [
+        (0.00, "support", None, None, None),
+        (0.06, "support", None, None, None),
+        (0.16, G, (-0.045, 0.005, -0.010), (0.0, 0.5, -1.0), (1.0, 0.0, 0.0)),    # thumb on the latch
+        (0.30, G, (-0.062, 0.000, -0.045), (0.0, 0.6, -1.0), (1.0, 0.5, 0.0)),    # cradling the swung-out cylinder
+        (0.46, G, (-0.062, 0.006, -0.062), (0.0, 0.3, -1.0), (1.0, 0.3, 0.0)),
+        (0.52, G, (-0.062, 0.006, -0.062), (0.0, 0.3, -1.0), (1.0, 0.3, 0.0)),    # thumb on the ejector rod
+        (0.60, G, (-0.060, 0.006, -0.042), (0.0, 0.3, -1.0), (1.0, 0.3, 0.0)),    # rod punched
+        (0.70, G, (-0.068, -0.012, -0.040), (0.0, 0.3, -1.0), (1.0, 0.3, 0.0)),
+        (0.95, "cam", (-0.05, -0.55, -0.30), (0.0, 1.0, -0.3), (1.0, 0.0, 0.0)),   # down to the belt for a speedloader
+        (1.05, "cam", (-0.05, -0.55, -0.30), (0.0, 1.0, -0.3), (1.0, 0.0, 0.0)),
+        # Pinching the speedloader's knob from the left, so the cylinder stays in view
+        # Held from below by its knob (palm up), so the speedloader and its rounds show above the fingers
+        (1.36, "grip", ((ax.x, ax.y, rear + ready + knob), (0.0, -0.034, 0.0)), (0.0, 0.3, -1.0), (0.0, 1.0, 0.0)),  # lined up
+        (1.46, "grip", ((ax.x, ax.y, rear + knob), (0.0, -0.034, 0.0)), (0.0, 0.3, -1.0), (0.0, 1.0, 0.0)),          # rounds in
+        (1.62, "grip", ((ax.x, ax.y, rear + knob), (0.0, -0.034, 0.0)), (0.5, 0.3, -1.0), (0.2, 1.0, 0.0)),          # twist
+        (1.72, "grip", ((ax.x, ax.y, rear + 0.030 + knob), (0.0, -0.034, 0.0)), (0.5, 0.3, -1.0), (0.2, 1.0, 0.0)),  # pull away
+        (1.98, "cam", (-0.05, -0.55, -0.30), (0.0, 1.0, -0.3), (1.0, 0.0, 0.0)),
+        (2.04, G, (-0.068, -0.014, -0.050), (0.0, 0.2, -1.0), (1.0, 0.4, 0.0)),   # under the cylinder
+        (2.12, G, (-0.062, 0.042, -0.050), (0.0, 0.2, -1.0), (1.0, -0.2, 0.0)),   # flick: spin it
+        (2.26, G, (-0.066, 0.020, -0.050), (0.0, 0.4, -1.0), (1.0, 0.0, 0.0)),
+        (2.40, G, (-0.036, 0.022, -0.050), (0.0, 0.4, -1.0), (1.0, 0.0, 0.0)),    # pushed shut
+        (2.62, "support", None, None, None),
+        (3.00, "support", None, None, None),
+    ]
+
+
+LEFT_KEYS = None
+
+
+def left_key_in_blender(key, t):
+    """(palm, fingers, normal) of a key, in Blender space at time t."""
+    _, space, p, f, n = key
+    if space == "support":
+        m = gun_motion(t) @ L0
+        motion = gun_motion(t)
+        palm = motion @ LEFT_PALM_SUPPORT
+        fingers = (m.to_3x3() @ Vector((0, 1, 0))).normalized()  # a bone's own +Y runs along it
+        normal = (motion.to_3x3() @ LEFT_NORMAL_SUPPORT).normalized()
+        return palm, fingers, normal
+    if space == "grip":  # a point on the gun plus an offset and a hand turn as seen from the eye
+        rot = CAM_TO_BLENDER.to_3x3().normalized()
+        at, offset = p
+        palm = gun_to_blender(t) @ Vector(at) + rot @ Vector(offset)
+        return palm, (rot @ Vector(f)).normalized(), (rot @ Vector(n)).normalized()
+    m = gun_to_blender(t) if space == "gun" else CAM_TO_BLENDER
+    rot = m.to_3x3().normalized()
+    return m @ Vector(p), (rot @ Vector(f)).normalized(), (rot @ Vector(n)).normalized()
+
+
+def pose_left(t):
+    keys = LEFT_KEYS
+    i = 0
+    while i < len(keys) - 2 and t > keys[i + 1][0]:
+        i += 1
+    a, b = keys[i], keys[i + 1]
+    s = max(0.0, min(1.0, (t - a[0]) / (b[0] - a[0])))
+    s = s * s * (3 - 2 * s)
+    if a[1] == "support" and b[1] == "support":
+        m = gun_motion(t) @ L0
+        target = m.translation
+        two_bone("upperarm_l", "lowerarm_l", target, Vector((0.6, 0.2, -1.0)))
+        pbones["hand_l"].matrix = m
+        upd()
+        return
+    pa, fa, na = left_key_in_blender(a, t)
+    pb_, fb, nb = left_key_in_blender(b, t)
+    palm = pa.lerp(pb_, s)
+    fingers = fa.lerp(fb, s).normalized()
+    if na is None:
+        na = nb
+    if nb is None:
+        nb = na
+    normal = na.lerp(nb, s).normalized()
+    # Reach so the palm centre lands on the target: aim the wrist, then correct by the miss
+    target = palm.copy()
+    for _ in range(3):
+        two_bone("upperarm_l", "lowerarm_l", target, Vector((0.9, 0.1, -1.0)))  # elbow out and down: the forearm comes in from the side
+        point("hand_l", fingers)
+        roll_palm("l", normal)
+        target = target + (palm - palm_center("l"))
+    miss = (palm - palm_center("l")).length
+    if miss > 0.01:
+        log("fp reload t=%.2f: left palm misses by %.0f mm (shoulder %.0f mm away)" % (t, miss * 1000, (palm - pbones["upperarm_l"].head).length * 1000))
+
+
+FP_LEFT_PALM = {}
 
 
 def fp_pose(ph, f):
-    global EYE
-    eyes = bpy.data.objects["head_eyes"]
+    global LEFT_KEYS
     if EYE is None:
-        EYE = sum((eyes.matrix_world @ v.co for v in eyes.data.vertices), Vector()) / len(eyes.data.vertices)
-    aim = (f - 31) / 9 if f >= 31 else 0.0
-    right = EYE + FP_HIP_PALM.lerp(FP_ADS_PALM, aim)
-    left = right + Vector((0.035, 0.0, -0.035))
-    if 1 <= f <= 30:
-        arc = math.sin(math.pi * (f - 1) / 29)
-        left = left + Vector((0.05, 0.15, -0.25)) * arc
-    hold_revolver(right, left)
+        setup_fp()
+        LEFT_KEYS = left_keys()
+    if f >= ADS_FIRST:
+        aim = (f - ADS_FIRST) / (FP_FRAMES - 1 - ADS_FIRST)
+        right = EYE + FP_HIP_PALM.lerp(FP_ADS_PALM, aim)
+        hold_revolver(right, right + Vector((0.035, 0.0, -0.035)))
+    elif RELOAD_FIRST <= f <= RELOAD_LAST:
+        t = (f - RELOAD_FIRST) / (RELOAD_LAST - RELOAD_FIRST) * RELOAD_SECONDS
+        right = EYE + FP_HIP_PALM
+        hold_revolver(right, right + Vector((0.035, 0.0, -0.035)))
+        # The right hand carries the gun: the whole hold moves with it
+        m = gun_motion(t) @ H0
+        two_bone("upperarm_r", "lowerarm_r", m.translation, Vector((-0.6, 0.2, -1.0)))
+        miss_r = (m.translation - pbones["hand_r"].head).length
+        if miss_r > 0.01:
+            log("fp reload t=%.2f: right wrist misses by %.0f mm" % (t, miss_r * 1000))
+        pbones["hand_r"].matrix = m
+        upd()
+        pose_left(t)
+    else:
+        right = EYE + FP_HIP_PALM
+        hold_revolver(right, right + Vector((0.035, 0.0, -0.035)))
+    FP_LEFT_PALM[f] = palm_center("l")
 
 
-make_action("fp_hold", 41, fp_pose)
+make_action("fp_hold", FP_FRAMES, fp_pose)
 
 
 # --- 7. Grip points (palm centre of the right hand) ----------------------
@@ -439,6 +679,10 @@ lines.append("aim_grip %.4f %.4f %.4f" % to_gltf(aim_grip))
 lines.append("aim_hand %.4f %.4f %.4f" % to_gltf(aim_hand))
 lines.append("fp_grip %.4f %.4f %.4f" % to_gltf(fp_grip))
 lines.append("eye %.4f %.4f %.4f" % to_gltf(EYE))
+lines.append("# fp_hold frames: 0 hip, %d..%d reload (%.1f s), %d..%d aim; left palm centre per frame (model space)"
+             % (RELOAD_FIRST, RELOAD_LAST, RELOAD_SECONDS, ADS_FIRST, FP_FRAMES - 1))
+for f in sorted(FP_LEFT_PALM):
+    lines.append("fp_left %d %.4f %.4f %.4f" % ((f,) + to_gltf(FP_LEFT_PALM[f])))
 with open(os.path.join(OUT_DIR, "character.txt"), "w") as fh:
     fh.write("\n".join(lines) + "\n")
 log("\n".join(lines))

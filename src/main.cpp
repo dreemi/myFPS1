@@ -86,6 +86,7 @@ int main() {
     // Camera feel (visual only: the real aim is never moved)
     float punchPitch = 0.0f, punchYaw = 0.0f; // degrees, kick when firing
     float shake = 0.0f;                         // when hit
+    float muzzleSmoke = 0.0f, smokeTimer = 0.0f;   // wisps off the muzzle after a shot
 
     SetExitKey(KEY_NULL); // Esc pauses instead of quitting
     EnableCursor();       // for the title screen
@@ -135,14 +136,15 @@ int main() {
                     audio.PlayGunshot(0.8f, 0.0f);
                     punchPitch += Lerp(2.4f, 1.1f, gun.GetAimAmount());
                     punchYaw += GetRandomValue(-100, 100) / 100.0f * 0.5f;
-                    // Effects: a tracer from roughly where the gun is, then whatever it hit
+                    // Effects: a tracer and smoke from where the gun's muzzle appears, then whatever it hit
                     const ShotResult& shot = gun.LastShot();
                     const Camera3D& c = player.GetCamera();
                     Vector3 fwd = player.GetLookDirection();
-                    Vector3 gunTip = Vector3Add(c.position, Vector3Add(Vector3Scale(fwd, 0.7f),
-                                        Vector3Add(Vector3Scale(player.GetRight(), 0.17f * (1.0f - gun.GetAimAmount())), { 0, -0.12f, 0 })));
+                    Vector3 gunTip = viewModel.CameraToWorld(viewModel.MuzzleCameraSpace(gun), c);
                     Vector3 end = shot.hit ? shot.point : Vector3Add(c.position, Vector3Scale(shot.direction, 80.0f));
                     Fx::Tracer(gunTip, end, { 255, 220, 160, 140 });
+                    Fx::GunSmoke(gunTip, fwd, 1.0f);
+                    muzzleSmoke = 1.0f;
                     Vector3 ear = c.position, right = player.GetRight();
                     if (shot.hitEnemy) {
                         Fx::Blood(shot.point, shot.direction, shot.headshot);
@@ -160,15 +162,38 @@ int main() {
                         addFeed(shot.headshot ? "RIVAL ELIMINATED  -  HEADSHOT" : "RIVAL ELIMINATED", { 255, 214, 92, 255 });
                     }
                 }
-                if (!wasReloading && gun.IsReloading()) audio.PlayReload();
-                if (gun.TakeDryFire()) audio.Play(Sfx::DryFire, 0.8f);
+                (void)wasReloading;
+                if (gun.TakeDryFire()) {
+                    audio.Play(Sfx::DryFire, 0.8f);
+                    viewModel.DryFire();
+                }
                 // Landing thud, louder for longer falls
                 if (player.IsGrounded() && !wasGrounded && lastFallSpeed > 3.0f)
                     audio.Play(Sfx::Land, Clamp(lastFallSpeed / 9.0f, 0.25f, 0.9f));
                 wasGrounded = player.IsGrounded();
                 lastFallSpeed = -player.GetVerticalVelocity();
                 player.SetZoom(gun.GetAimAmount());
-                viewModel.Update(dt, MotionOf(player), gun);
+                viewModel.Update(dt, MotionOf(player), gun, &player.GetCamera());
+                // The revolver's mechanism: reload sounds on their beats, cases dropping into the world
+                ViewModelEvents vmEvents = viewModel.TakeEvents();
+                if (vmEvents.latch) audio.PlayReloadStep(ReloadStep::Latch);
+                if (vmEvents.open) audio.PlayReloadStep(ReloadStep::Open);
+                if (vmEvents.eject) audio.PlayReloadStep(ReloadStep::Eject);
+                if (vmEvents.insert) audio.PlayReloadStep(ReloadStep::Insert);
+                if (vmEvents.spin) audio.PlayReloadStep(ReloadStep::Spin);
+                if (vmEvents.close) audio.PlayReloadStep(ReloadStep::Close);
+                for (const ViewModelEvents::Casing& cs : vmEvents.casings)
+                    Fx::Casing(cs.position, Vector3Add(cs.velocity, player.GetVelocity()), cs.fired);
+                // Smoke keeps curling off the muzzle for a moment after a shot
+                if (muzzleSmoke > 0.0f) {
+                    smokeTimer -= dt;
+                    if (smokeTimer <= 0.0f) {
+                        smokeTimer = 0.05f;
+                        Vector3 tip = viewModel.CameraToWorld(viewModel.MuzzleCameraSpace(gun), player.GetCamera());
+                        Fx::GunSmoke(tip, { 0, 1, 0 }, muzzleSmoke * 0.3f);
+                    }
+                    muzzleSmoke -= dt * 1.1f;
+                }
                 Stance st = player.GetStance();
                 float stride = st == Stance::Sprinting ? 2.2f : (st == Stance::CrouchMoving ? 1.0f : 1.4f);
                 bodyPhase += player.GetSpeed() * dt / stride;
@@ -230,6 +255,8 @@ int main() {
                 }
             }
             Fx::Update(dt);
+            for (const Fx::CasingBounce& b : Fx::TakeCasingBounces())
+                audio.PlayAt(Sfx::CasingTink, b.position, player.GetCamera().position, player.GetRight(), 0.25f + 0.5f * b.strength);
             hurt = std::max(0.0f, hurt - dt * 1.2f);
             shake = std::max(0.0f, shake - dt * 3.0f);
             killBanner = std::max(0.0f, killBanner - dt);
@@ -325,6 +352,8 @@ int main() {
             drawPlayerBody(PART_LEGS);
             for (const SpawnPoint& s : spawns)
                 Fx::DrawGroundMarker(s.position, 1.3f, s.yaw, { s.color.r, s.color.g, s.color.b, 170 });
+            Fx::DrawCasings(DrawCartridge);
+            Render::SurfaceObject(0.25f);
             Fx::Draw(cam);
         Render::EndWorldPass();
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "raylib.h"
 #include "world.hpp"
+#include <vector>
 
 // Visual effects: particles (sparks, dust, blood, smoke), bullet-hole decals,
 // muzzle flash sprites and tracers. Purely cosmetic; nothing here affects
@@ -21,6 +22,16 @@ void Blood(Vector3 point, Vector3 bulletDir, bool headshot);
 void MuzzleFlash(Vector3 muzzle, Vector3 dir);
 // A bullet's path, briefly visible
 void Tracer(Vector3 from, Vector3 to, Color color);
+// Thin smoke curling off a muzzle after a shot (amount 0..1)
+void GunSmoke(Vector3 muzzle, Vector3 dir, float amount);
+
+// Spent brass (and dumped live rounds): falls, bounces, comes to rest on the ground
+void Casing(Vector3 position, Vector3 velocity, bool fired);
+// Draws them with the given cartridge drawer (origin at the rim, bullet along -Z); in the world pass
+void DrawCasings(void (*draw)(Matrix transform, bool fired));
+// Where cases hit the ground since the last call, and how hard (0..1), for sounds
+struct CasingBounce { Vector3 position; float strength; };
+std::vector<CasingBounce> TakeCasingBounces();
 
 // A painted ring with an arrow on the ground (spawn points); yaw = arrow direction (0 = +Z)
 void DrawGroundMarker(Vector3 position, float radius, float yaw, Color color);

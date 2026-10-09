@@ -7,8 +7,12 @@
 // Short effects, synthesized at startup (no files)
 enum class Sfx {
     ImpactConcrete, ImpactSteel, FleshHit, HitTick, Headshot, KillConfirm,
-    BulletCrack, Hurt, DryFire, Land, Count
+    BulletCrack, Hurt, DryFire, Land, CasingTink, Count
 };
+
+// The revolver's reload, step by step (cut from the reload recording so each
+// sound lands on its moment in the animation)
+enum class ReloadStep { Latch, Open, Eject, Insert, Spin, Close, Count };
 
 // All game sound. Sounds are triggered by gameplay events from the outside
 // (main.cpp); nothing in the gameplay code knows about audio.
@@ -24,7 +28,7 @@ public:
     // A gunshot heard from `source` by a listener at `ear` facing with `right` as their right
     void PlayGunshotAt(Vector3 source, Vector3 ear, Vector3 right);
 
-    void PlayReload();
+    void PlayReloadStep(ReloadStep step);
     void StopReload();
 
     // Effects: flat (UI-like) or positioned in the world
@@ -44,7 +48,7 @@ private:
     Sound gunshot{};
     Sound gunshotVoices[GUNSHOT_VOICES]{};
     int nextVoice = 0;
-    Sound reload{};
+    Sound reloadSteps[(int)ReloadStep::Count]{};
     Sound walk{};
     Sound run{};
     Sound enemyWalk{}, enemyRun{};      // aliases: their own playback state

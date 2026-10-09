@@ -15,6 +15,7 @@ static const Vector3 GROUND_AMBIENT = { 0.16f, 0.14f, 0.12f };// linear, bounce 
 static const Vector3 HORIZON = { 0.74f, 0.77f, 0.80f };       // sRGB; also the fog colour
 static const Vector3 ZENITH = { 0.27f, 0.45f, 0.74f };        // sRGB
 static const Vector3 SUN_TINT = { 1.00f, 0.90f, 0.75f };      // sRGB
+static const Vector3 ENV_GROUND = { 0.26f, 0.22f, 0.17f };    // linear: sunlit paving, as reflections see it
 static const float FOG_DENSITY = 0.006f;
 static const int SHADOW_SIZE = 4096;
 
@@ -221,7 +222,11 @@ void DrawSky(const Camera3D& cam, int w, int h) {
     EndShaderMode();
 }
 
-static void SetCommonLighting(Vector3 sunDir, Vector3 viewPos, float fog, int shadows, float sunVisibility) {
+static void SetCommonLighting(Vector3 sunDir, Vector3 viewPos, float fog, int shadows, float sunVisibility, Vector3 up) {
+    SetVec3(lit, "envUp", up);
+    SetVec3(lit, "horizonColor", HORIZON);
+    SetVec3(lit, "zenithColor", ZENITH);
+    SetVec3(lit, "envGround", ENV_GROUND);
     SetVec3(lit, "sunDir", sunDir);
     SetVec3(lit, "sunColor", SUN_COLOR);
     SetVec3(lit, "skyAmbient", SKY_AMBIENT);
@@ -236,7 +241,7 @@ static void SetCommonLighting(Vector3 sunDir, Vector3 viewPos, float fog, int sh
 void BeginWorldPass(const Camera3D& cam) {
     BeginMode3D(cam);
     if (!ready) return;
-    SetCommonLighting(SUN_DIR, cam.position, FOG_DENSITY, 1, 1.0f);
+    SetCommonLighting(SUN_DIR, cam.position, FOG_DENSITY, 1, 1.0f, { 0, 1, 0 });
     SetShaderValueMatrix(lit, Loc(lit, "lightVP"), lightVP);
     int slot = 10;
     rlActiveTextureSlot(slot);
@@ -257,8 +262,9 @@ void SetViewModelLighting(const Camera3D& worldCam, float sunVisibility) {
     // (rotate the direction: transform it and subtract where the origin goes)
     Matrix view = GetCameraMatrix(worldCam);
     Vector3 sunView = Vector3Normalize(Vector3Subtract(Vector3Transform(SUN_DIR, view), Vector3Transform({ 0, 0, 0 }, view)));
-    SetCommonLighting(sunView, { 0, 0, 0 }, 0.0f, 0, sunVisibility);
-    // Ambient keeps its world meaning (up = sky) only roughly in camera space; fine for a gun
+    // Sky above and ground below keep their world meaning in camera space
+    Vector3 upView = Vector3Normalize(Vector3Subtract(Vector3Transform({ 0, 1, 0 }, view), Vector3Transform({ 0, 0, 0 }, view)));
+    SetCommonLighting(sunView, { 0, 0, 0 }, 0.0f, 0, sunVisibility, upView);
     SurfaceObject(0.35f);
 }
 
@@ -266,6 +272,7 @@ void SurfaceWorldMapped(float tileSize, float specular) {
     if (!ready) return;
     rlDrawRenderBatchActive();
     SetInt(lit, "worldMapped", 1);
+    SetInt(lit, "materialMode", 0);
     SetFloat(lit, "tileSize", tileSize);
     SetFloat(lit, "specular", specular);
 }
@@ -274,7 +281,20 @@ void SurfaceObject(float specular) {
     if (!ready) return;
     rlDrawRenderBatchActive();
     SetInt(lit, "worldMapped", 0);
+    SetInt(lit, "materialMode", 0);
     SetFloat(lit, "specular", specular);
+}
+
+void SurfacePbr(float metallic, float roughness, bool roughMap, bool normalMap, float occlusion) {
+    if (!ready) return;
+    rlDrawRenderBatchActive();
+    SetInt(lit, "worldMapped", 0);
+    SetInt(lit, "materialMode", 1);
+    SetFloat(lit, "metallic", metallic);
+    SetFloat(lit, "roughness", roughness);
+    SetInt(lit, "useRoughMap", roughMap ? 1 : 0);
+    SetInt(lit, "useNormalMap", normalMap ? 1 : 0);
+    SetFloat(lit, "occlusion", occlusion);
 }
 
 void SetFlashLight(int slot, Vector3 position, Vector3 color, float radius) {

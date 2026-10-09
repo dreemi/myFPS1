@@ -40,7 +40,10 @@ void SetViewModelLighting(const Camera3D& worldCamera, float sunVisibility);
 
 // Surface kinds (switching flushes pending batched geometry)
 void SurfaceWorldMapped(float tileSize, float specular); // level boxes/ground: world-space UVs + normal maps
-void SurfaceObject(float specular);                       // models with their own UVs (characters, guns)
+void SurfaceObject(float specular);                       // models with their own UVs (characters)
+// Physically based metal/dielectric with sky reflections (weapons, casings). Roughness multiplies
+// the roughness map (texture1.r) when roughMap; normalMap uses texture2. Occlusion scales sky light.
+void SurfacePbr(float metallic, float roughness, bool roughMap, bool normalMap, float occlusion = 1.0f);
 
 // Short-lived point lights for muzzle flashes (slot 0 or 1), radius 0 turns it off
 void SetFlashLight(int slot, Vector3 position, Vector3 color, float radius);

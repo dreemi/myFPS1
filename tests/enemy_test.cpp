@@ -554,23 +554,57 @@ int main() {
         float restUp = muzzleUp(fireVm, fired);
         World nothing;
         std::vector<Enemy> noEnemies;
+        float cylinderBefore = fireVm.Mechanism().cylinder;
         fired.Fire(CameraAt({ 0, 1.7f, 0 }, { 0, 1.7f, 1 }), nothing, noEnemies);
-        Vector3 kicked = gunPos(fireVm, fired);
-        float kickedUp = muzzleUp(fireVm, fired);
-        CHECK(kicked.z > rest.z + 0.02f && kickedUp > restUp + 5.0f && fired.IsMuzzleFlashing(),
-              "firing: gun kicks back %.0f mm and the muzzle up %.0f deg, with a flash", (kicked.z - rest.z) * 1000,
-              kickedUp - restUp);
+        bool flashed = fired.IsMuzzleFlashing();
+        float kickedBack = 0.0f, kickedUp = 0.0f, hammerAtShot = -1.0f, triggerAtShot = -1.0f;
+        for (int i = 0; i < 8; i++) { // the springs peak a few frames after the shot
+            fireVm.Update(DT, still, fired);
+            if (i == 0) { hammerAtShot = fireVm.Mechanism().hammer; triggerAtShot = fireVm.Mechanism().trigger; }
+            kickedBack = fmaxf(kickedBack, gunPos(fireVm, fired).z - rest.z);
+            kickedUp = fmaxf(kickedUp, muzzleUp(fireVm, fired) - restUp);
+            fired.Tick(DT, Stance::Still);
+        }
+        CHECK(kickedBack > 0.02f && kickedUp > 5.0f && flashed,
+              "firing: gun kicks back %.0f mm and the muzzle up %.0f deg, with a flash", kickedBack * 1000, kickedUp);
+        CHECK(triggerAtShot > 0.9f && hammerAtShot < 0.5f, "at the shot the trigger is back and the hammer has fallen");
+        CHECK(fabsf(fireVm.Mechanism().cylinder - cylinderBefore - 1.0f) < 0.01f &&
+              fireVm.Mechanism().chambers[RevolverChamberAtBarrel(cylinderBefore)] == CHAMBER_FIRED,
+              "the cylinder indexes one chamber; the fired chamber holds an empty case");
         for (int i = 0; i < 30; i++) { fired.Tick(DT, Stance::Still); fireVm.Update(DT, still, fired); }
-        CHECK(fabsf(muzzleUp(fireVm, fired) - restUp) < 1.0f, "recoil recovers within 0.5 s");
+        CHECK(fabsf(muzzleUp(fireVm, fired) - restUp) < 1.0f && fireVm.Mechanism().trigger == 0.0f,
+              "recoil recovers and the trigger resets within 0.6 s");
 
-        // Reloading: dips and rolls mid-reload, back when the new magazine is in
+        // Reloading: cylinder out, cases dumped, a speedloader in, cylinder shut, back on target
         CHECK(fired.StartReload(), "reload starts (magazine not full)");
-        for (int i = 0; i < (int)(REVOLVER.reloadTime * 0.5f * 60); i++) { fired.Tick(DT, Stance::Still); fireVm.Update(DT, still, fired); }
-        float midY = gunPos(fireVm, fired).y - rest.y;
-        for (int i = 0; i < (int)(REVOLVER.reloadTime * 0.6f * 60); i++) { fired.Tick(DT, Stance::Still); fireVm.Update(DT, still, fired); }
-        CHECK(midY < -0.06f && !fired.IsReloading() && fired.GetAmmo() == REVOLVER.magazineSize &&
-              fabsf(gunPos(fireVm, fired).y - rest.y) < 0.006f,
-              "reloading: gun drops %.0f mm mid-reload, returns with a full magazine", midY * 1000);
+        auto runFor = [&](float seconds) {
+            for (int i = 0; i < (int)(seconds * 60); i++) { fired.Tick(DT, Stance::Still); fireVm.Update(DT, still, fired); }
+        };
+        float t = 0.0f;
+        auto runTo = [&](float seconds) { runFor((seconds - t) * REVOLVER.reloadTime / 3.0f); t = seconds; };
+        runTo(0.45f);
+        CHECK(fireVm.Mechanism().crane > 0.95f, "the cylinder swings out (crane %.2f)", fireVm.Mechanism().crane);
+        runTo(0.585f);
+        CHECK(fireVm.Mechanism().ejector > 0.3f && fireVm.Mechanism().caseLift > 0.3f, "the ejector pushes the cases out");
+        runTo(0.9f);
+        int emptyAfterEject = 0;
+        for (int k = 0; k < 6; k++) emptyAfterEject += fireVm.Mechanism().chambers[k] == CHAMBER_EMPTY;
+        CHECK(emptyAfterEject == 6, "all six chambers are emptied");
+        runTo(1.30f);
+        CHECK(fireVm.Mechanism().speedloader && fireVm.Mechanism().speedloaderFull, "a full speedloader comes up");
+        runTo(1.60f);
+        int liveAfterLoad = 0;
+        for (int k = 0; k < 6; k++) liveAfterLoad += fireVm.Mechanism().chambers[k] == CHAMBER_LIVE;
+        CHECK(liveAfterLoad == 6 && !fireVm.Mechanism().speedloaderFull, "six rounds go in");
+        runTo(2.50f);
+        float closedAt = fireVm.Mechanism().cylinder;
+        CHECK(fireVm.Mechanism().crane < 0.01f && fabsf(closedAt - roundf(closedAt)) < 0.01f,
+              "the cylinder closes with a chamber lined up (%.2f chambers turned)", closedAt);
+        runFor(REVOLVER.reloadTime * 0.25f);
+        CHECK(!fired.IsReloading() && fired.GetAmmo() == REVOLVER.magazineSize && Vector3Distance(gunPos(fireVm, fired), rest) < 0.006f,
+              "reloading: returns on target with a full cylinder");
+        ViewModelEvents ev = fireVm.TakeEvents();
+        (void)ev;
     }
 
     std::printf("Bullet spread\n");

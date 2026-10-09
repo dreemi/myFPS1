@@ -37,6 +37,18 @@ static Texture2D textures[5];
 static std::vector<Particle> particles;
 static std::vector<Decal> decals;
 static std::vector<TracerFx> tracers;
+
+struct Brass {
+    Vector3 pos, vel;
+    Matrix rot;          // orientation (rotation only)
+    Vector3 spinAxis;
+    float spinRate;      // rad/s
+    float life;
+    bool fired, resting;
+};
+static std::vector<Brass> brass;
+static std::vector<CasingBounce> bounces;
+static const size_t MAX_BRASS = 48;
 static bool ready = false;
 static const size_t MAX_PARTICLES = 1500, MAX_DECALS = 96;
 
@@ -150,6 +162,8 @@ void Clear() {
     particles.clear();
     decals.clear();
     tracers.clear();
+    brass.clear();
+    bounces.clear();
 }
 
 // --- Spawning -------------------------------------------------------------------
@@ -232,6 +246,78 @@ void Tracer(Vector3 from, Vector3 to, Color color) {
     tracers.push_back({ from, to, 0.0f, 0.07f, color });
 }
 
+void GunSmoke(Vector3 muzzle, Vector3 dir, float amount) {
+    if (!ready || amount <= 0.0f) return;
+    // A puff pushed out ahead, then wisps that hang and rise slowly
+    int puffs = 2 + (int)(amount * 3.0f);
+    for (int i = 0; i < puffs; i++) {
+        Vector3 d = RandAround(dir, 0.35f);
+        Emit({ Vector3Add(muzzle, Vector3Scale(dir, 0.04f)), Vector3Scale(d, Rand(0.6f, 2.2f) * amount), 0,
+               Rand(0.9f, 1.8f), Rand(0.05f, 0.09f), Rand(0.20f, 0.35f), Rand(0, 360), Rand(-30, 30), -0.35f, 3.0f,
+               { 205, 205, 200, (unsigned char)(70 * amount + 20) }, Tex::Soft, Blend::Alpha, false });
+    }
+}
+
+void Casing(Vector3 position, Vector3 velocity, bool fired) {
+    if (!ready) return;
+    if (brass.size() >= MAX_BRASS) brass.erase(brass.begin());
+    Brass b;
+    b.pos = position;
+    b.vel = velocity;
+    b.rot = MatrixRotate(Vector3Normalize({ Rand(-1, 1), Rand(-1, 1), Rand(-1, 1) + 0.01f }), Rand(0, 2 * PI));
+    b.spinAxis = RandUnit();
+    b.spinRate = Rand(8.0f, 22.0f);
+    b.life = 0.0f;
+    b.fired = fired;
+    b.resting = false;
+    brass.push_back(b);
+}
+
+void DrawCasings(void (*draw)(Matrix, bool)) {
+    for (const Brass& b : brass) draw(MatrixMultiply(b.rot, MatrixTranslate(b.pos.x, b.pos.y, b.pos.z)), b.fired);
+}
+
+std::vector<CasingBounce> TakeCasingBounces() {
+    std::vector<CasingBounce> out;
+    out.swap(bounces);
+    return out;
+}
+
+static void UpdateBrass(float dt) {
+    const float RADIUS = 0.0055f; // lying on its side, the case's centre is this high
+    for (Brass& b : brass) {
+        b.life += dt;
+        if (b.resting) continue;
+        b.vel.y -= 9.81f * dt;
+        b.pos = Vector3Add(b.pos, Vector3Scale(b.vel, dt));
+        b.rot = MatrixMultiply(b.rot, MatrixRotate(b.spinAxis, b.spinRate * dt));
+        if (b.pos.y < RADIUS && b.vel.y < 0.0f) {
+            float impact = -b.vel.y;
+            b.pos.y = RADIUS;
+            if (impact > 0.6f) bounces.push_back({ b.pos, Clamp(impact / 4.0f, 0.15f, 1.0f) });
+            // Bounce: lose most of the height, skitter sideways, tumble differently
+            b.vel.y = impact * 0.32f;
+            b.vel.x = b.vel.x * 0.55f + Rand(-0.6f, 0.6f) * impact * 0.3f;  // brass skitters off at odd angles
+            b.vel.z = b.vel.z * 0.55f + Rand(-0.6f, 0.6f) * impact * 0.3f;
+            b.spinAxis = RandUnit();
+            b.spinRate *= 0.6f;
+            if (impact < 0.6f) {
+                // Settle: lie flat, rolling to a stop about its own axis
+                Vector3 axis = Vector3Transform({ 0, 0, 1 }, b.rot);
+                axis.y = 0.0f;
+                if (Vector3LengthSqr(axis) < 1e-4f) axis = { 1, 0, 0 };
+                axis = Vector3Normalize(axis);
+                float yaw = atan2f(axis.x, axis.z);
+                b.rot = MatrixMultiply(MatrixRotateZ(Rand(0, 2 * PI)), MatrixRotateY(yaw));
+                b.resting = true;
+                b.vel = { 0, 0, 0 };
+            }
+        }
+    }
+    // Old brass disappears after a while
+    brass.erase(std::remove_if(brass.begin(), brass.end(), [](const Brass& b) { return b.life > 30.0f; }), brass.end());
+}
+
 // --- Update -----------------------------------------------------------------------
 
 void Update(float dt) {
@@ -252,6 +338,7 @@ void Update(float dt) {
                     particles.end());
     for (Decal& d : decals) d.life -= dt;
     decals.erase(std::remove_if(decals.begin(), decals.end(), [](const Decal& d) { return d.life <= 0; }), decals.end());
+    UpdateBrass(dt);
     for (TracerFx& t : tracers) t.life += dt;
     tracers.erase(std::remove_if(tracers.begin(), tracers.end(), [](const TracerFx& t) { return t.life >= t.maxLife; }),
                   tracers.end());

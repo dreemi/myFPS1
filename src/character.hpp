@@ -28,6 +28,7 @@ struct CharacterAssets {
     std::vector<int> meshPart;   // CharPart of each mesh
     Vector3 aimGrip{};           // right palm centre in the idle (aiming) pose
     Vector3 fpGrip{};            // right palm centre in the first-person hold pose
+    std::vector<Vector3> fpLeftPalm; // left palm centre for each Blender frame of fp_hold (model space)
     int handBone = -1;           // hand_r
     bool loaded = false;
 };
@@ -46,3 +47,11 @@ void DrawCharacter(CharacterAssets& c, CharAnim anim, int frame, Matrix transfor
 
 // Model-space position of the right palm (where a gun is held) in that frame
 Vector3 CharacterGripPoint(const CharacterAssets& c, CharAnim anim, int frame);
+// Model-space transform of the right hand bone in that frame
+Matrix CharacterHandTransform(const CharacterAssets& c, CharAnim anim, int frame);
+
+// fp_hold's frames, as authored in Blender (tools/export_character.py)
+const float FP_RELOAD_FIRST = 1.0f, FP_RELOAD_LAST = 90.0f;  // the revolver's reload
+const float FP_ADS_FIRST = 91.0f, FP_LAST_FRAME = 100.0f;    // hip -> aiming down sights
+// Left palm centre (model space) at a Blender frame of fp_hold, interpolated
+Vector3 CharacterFpLeftPalm(const CharacterAssets& c, float blenderFrame);

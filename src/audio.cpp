@@ -120,6 +120,17 @@ Sound MakeSfx(Sfx kind) {
         x.Tone(2600.0f, 0.4f, 120.0f, 0.035f);
         return x.Make(0.5f);
     }
+    case Sfx::CasingTink: {     // a brass case bouncing on stone: bright, short, inharmonic
+        Synth x(0.25f);
+        x.NoiseBurst(0.35f, 220.0f, 0.95f, 0.9f);
+        const float base = 3150.0f;
+        x.Tone(base, 0.55f, 26.0f);
+        x.Tone(base * 1.47f, 0.40f, 32.0f);
+        x.Tone(base * 2.27f, 0.30f, 40.0f);
+        x.Tone(base * 3.11f, 0.18f, 55.0f);
+        x.Tone(base * 0.52f, 0.15f, 30.0f, 0.0f, 0.9f);
+        return x.Make(0.45f);
+    }
     case Sfx::Land: {           // boots hitting the ground
         Synth x(0.2f);
         x.NoiseBurst(1.0f, 30.0f, 0.09f);
@@ -166,13 +177,53 @@ static Sound LoadCleanSound(const std::string& path, bool trimEnd, float peak) {
     return snd;
 }
 
+// The reload recording, cut into its separate mechanical sounds. Times are
+// seconds into reload.mp3; each cut starts just before its click so playing it
+// at the animation's moment puts the click on the beat.
+static void LoadReloadSteps(const std::string& path, Sound out[(int)ReloadStep::Count]) {
+    static const float CUTS[(int)ReloadStep::Count][2] = {
+        { 0.29f, 0.43f },  // Latch: the thumb-piece click
+        { 0.43f, 0.72f },  // Open: the cylinder rattling out on the crane
+        { 0.76f, 1.20f },  // Eject: the rod stroke and cases clattering out
+        { 1.33f, 1.72f },  // Insert: rounds seating, the speedloader letting go
+        { 2.88f, 3.36f },  // Spin: the cylinder's ratchet whirring down
+        { 2.04f, 2.46f },  // Close: the crane slapping shut and locking
+    };
+    Wave w = LoadWave(path.c_str());
+    if (w.data == nullptr) return;
+    WaveFormat(&w, w.sampleRate, 32, w.channels);
+    const float* s = (const float*)w.data;
+    float loudest = 0.0f;
+    for (unsigned i = 0; i < w.frameCount * w.channels; i++) loudest = fmaxf(loudest, fabsf(s[i]));
+    float gain = loudest > 0.0f ? 0.8f / loudest : 1.0f;
+    for (int k = 0; k < (int)ReloadStep::Count; k++) {
+        Wave cut = WaveCopy(w);
+        int from = (int)(CUTS[k][0] * w.sampleRate), to = (int)(CUTS[k][1] * w.sampleRate);
+        if (to > (int)w.frameCount) to = (int)w.frameCount;
+        if (from >= to) { UnloadWave(cut); continue; }
+        WaveCrop(&cut, from, to);
+        float* c = (float*)cut.data;
+        int frames = (int)cut.frameCount, ch = (int)cut.channels;
+        int fadeIn = (int)(0.004f * cut.sampleRate), fadeOut = (int)(0.04f * cut.sampleRate);
+        for (int f = 0; f < frames; f++) {
+            float g = gain;
+            if (f < fadeIn) g *= (float)f / fadeIn;
+            if (f > frames - fadeOut) g *= (float)(frames - f) / fadeOut;
+            for (int j = 0; j < ch; j++) c[f * ch + j] *= g;
+        }
+        out[k] = LoadSoundFromWave(cut);
+        UnloadWave(cut);
+    }
+    UnloadWave(w);
+}
+
 bool GameAudio::Load(const std::string& assetDir) {
     std::string dir = assetDir + "sounds/";
     gunshot = LoadCleanSound(dir + "gunshot.mp3", false, 0.9f);
-    reload = LoadCleanSound(dir + "reload.mp3", false, 0.8f);
+    LoadReloadSteps(dir + "reload.mp3", reloadSteps);
     walk = LoadCleanSound(dir + "walk.mp3", true, 0.6f);
     run = LoadCleanSound(dir + "run.mp3", true, 0.6f);
-    loaded = IsSoundValid(gunshot) && IsSoundValid(reload) && IsSoundValid(walk) && IsSoundValid(run);
+    loaded = IsSoundValid(gunshot) && IsSoundValid(reloadSteps[0]) && IsSoundValid(walk) && IsSoundValid(run);
     if (!loaded) {
         TraceLog(LOG_WARNING, "AUDIO: sounds missing from %s, playing silently", dir.c_str());
         Unload();
@@ -203,7 +254,8 @@ void GameAudio::Unload() {
         for (Sound& v : sfxVoices[k]) if (IsSoundValid(v)) UnloadSoundAlias(v);
         if (IsSoundValid(sfx[k])) UnloadSound(sfx[k]);
     }
-    for (Sound* s : { &gunshot, &reload, &walk, &run }) if (IsSoundValid(*s)) UnloadSound(*s);
+    for (Sound* s : { &gunshot, &walk, &run }) if (IsSoundValid(*s)) UnloadSound(*s);
+    for (Sound& s : reloadSteps) if (IsSoundValid(s)) UnloadSound(s);
     if (windLoaded) UnloadMusicStream(wind);
     *this = GameAudio{};
 }
@@ -275,14 +327,18 @@ void GameAudio::PlayGunshotAt(Vector3 source, Vector3 ear, Vector3 right) {
     PlayGunshot(volume, pan);
 }
 
-void GameAudio::PlayReload() {
+void GameAudio::PlayReloadStep(ReloadStep step) {
     if (!loaded) return;
-    SetSoundVolume(reload, 0.8f);
-    PlaySound(reload);
+    Sound& s = reloadSteps[(int)step];
+    if (!IsSoundValid(s)) return;
+    SetSoundVolume(s, 0.85f);
+    SetSoundPitch(s, GetRandomValue(97, 103) / 100.0f);
+    PlaySound(s);
 }
 
 void GameAudio::StopReload() {
-    if (loaded) StopSound(reload);
+    if (!loaded) return;
+    for (Sound& s : reloadSteps) if (IsSoundValid(s)) StopSound(s);
 }
 
 void GameAudio::UpdateFootsteps(Stance stance, bool alive) {

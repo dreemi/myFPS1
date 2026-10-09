@@ -36,6 +36,9 @@ bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
                 c.aimGrip = v;
             } else if (sscanf(line, "fp_grip %f %f %f", &v.x, &v.y, &v.z) == 3) {
                 c.fpGrip = v;
+            } else if (sscanf(line, "fp_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4 && index >= 0 && index < 1000) {
+                if ((int)c.fpLeftPalm.size() <= index) c.fpLeftPalm.resize(index + 1, v);
+                c.fpLeftPalm[index] = v;
             }
         }
         UnloadFileText(text);
@@ -86,6 +89,23 @@ void DrawCharacter(CharacterAssets& c, CharAnim anim, int frame, Matrix transfor
         DrawMesh(c.model.meshes[i], mat, m);
         mat.maps[MATERIAL_MAP_DIFFUSE].color = old;
     }
+}
+
+Matrix CharacterHandTransform(const CharacterAssets& c, CharAnim anim, int frame) {
+    if (!c.loaded) return MatrixIdentity();
+    const ModelAnimation& a = c.anims[c.animIndex[(int)anim]];
+    frame = Clamp(frame, 0, a.frameCount - 1);
+    const Transform& t = a.framePoses[frame][c.handBone];
+    return MatrixMultiply(MatrixMultiply(MatrixScale(t.scale.x, t.scale.y, t.scale.z), QuaternionToMatrix(t.rotation)),
+                          MatrixTranslate(t.translation.x, t.translation.y, t.translation.z));
+}
+
+Vector3 CharacterFpLeftPalm(const CharacterAssets& c, float blenderFrame) {
+    if (c.fpLeftPalm.empty()) return { 0, 0, 0 };
+    float f = Clamp(blenderFrame, 0.0f, (float)(c.fpLeftPalm.size() - 1));
+    int i = (int)f;
+    int j = i + 1 < (int)c.fpLeftPalm.size() ? i + 1 : i;
+    return Vector3Lerp(c.fpLeftPalm[i], c.fpLeftPalm[j], f - (float)i);
 }
 
 Vector3 CharacterGripPoint(const CharacterAssets& c, CharAnim anim, int frame) {
