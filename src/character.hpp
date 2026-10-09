@@ -1,0 +1,48 @@
+#pragma once
+#include "raylib.h"
+#include <string>
+#include <vector>
+
+// The human character model (assets/models/character, made by
+// tools/export_character.py). Used for the enemy, for the player's own body
+// (hips and legs, seen when looking down), and for the first-person arms.
+// Model space: meters, Y up, facing +Z, the character's right is -X.
+
+enum class CharAnim { Idle, Walk, Run, Crouch, CrouchWalk, FpHold, Count };
+
+// Which parts of the mesh to draw (see tools/export_character.py)
+enum CharPart {
+    PART_HEAD = 1,       // head and neck
+    PART_UPPERARMS = 2,
+    PART_FOREARMS = 4,   // forearms and hands: the first-person arms
+    PART_TORSO = 8,      // chest and shoulders
+    PART_LEGS = 16,      // hips, legs, feet: your own body when you look down
+    PART_ALL = 31,
+};
+
+struct CharacterAssets {
+    Model model{};
+    ModelAnimation* anims = nullptr;
+    int animCount = 0;
+    int animIndex[(int)CharAnim::Count] = { -1, -1, -1, -1, -1, -1 };
+    std::vector<int> meshPart;   // CharPart of each mesh
+    Vector3 aimGrip{};           // right palm centre in the idle (aiming) pose
+    Vector3 fpGrip{};            // right palm centre in the first-person hold pose
+    int handBone = -1;           // hand_r
+    bool loaded = false;
+};
+
+bool LoadCharacter(CharacterAssets& c, const std::string& assetDir);
+void UnloadCharacter(CharacterAssets& c);
+
+// Animation frame for a looping phase (0..1)
+int CharacterFrame(const CharacterAssets& c, CharAnim anim, float phase);
+// Animation frame at a fraction (0..1) of a non-looping animation, 1 = the last frame
+int CharacterFrameAt(const CharacterAssets& c, CharAnim anim, float fraction);
+
+// Pose the model and draw the chosen parts. `transform` goes from model space
+// to wherever it's drawn (world, or gun space for the first-person arms).
+void DrawCharacter(CharacterAssets& c, CharAnim anim, int frame, Matrix transform, int parts, Color tint);
+
+// Model-space position of the right palm (where a gun is held) in that frame
+Vector3 CharacterGripPoint(const CharacterAssets& c, CharAnim anim, int frame);

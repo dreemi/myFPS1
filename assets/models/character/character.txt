@@ -1,0 +1,19 @@
+# character.glb parts, in raylib mesh order: <index> <part> <object>
+mesh 0 forearms forearms_body
+mesh 1 forearms forearms_suit
+mesh 2 head head_body
+mesh 3 head head_eyes
+mesh 4 head head_suit
+mesh 5 legs legs_body
+mesh 6 legs legs_shoes
+mesh 7 legs legs_suit
+mesh 8 torso torso_body
+mesh 9 torso torso_suit
+mesh 10 upperarms upperarms_body
+mesh 11 upperarms upperarms_suit
+# animations: crouch crouch_walk fp_hold idle run walk
+# right-hand grip point (palm centre), model space (Y up, facing +Z), meters
+aim_grip -0.0186 1.3616 0.4972
+aim_hand -0.0400 1.3968 0.4456
+fp_grip -0.1676 1.4298 0.5865
+eye 0.0005 1.6873 0.1366
