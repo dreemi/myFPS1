@@ -80,6 +80,9 @@ int main() {
         if (feed.size() > 4) feed.pop_back();
     };
 
+    bool wasGrounded = true;   // for the landing sound
+    float lastFallSpeed = 0.0f;
+
     // Camera feel (visual only: the real aim is never moved)
     float punchPitch = 0.0f, punchYaw = 0.0f; // degrees, kick when firing
     float shake = 0.0f;                         // when hit
@@ -140,15 +143,30 @@ int main() {
                                         Vector3Add(Vector3Scale(player.GetRight(), 0.17f * (1.0f - gun.GetAimAmount())), { 0, -0.12f, 0 })));
                     Vector3 end = shot.hit ? shot.point : Vector3Add(c.position, Vector3Scale(shot.direction, 80.0f));
                     Fx::Tracer(gunTip, end, { 255, 220, 160, 140 });
-                    if (shot.hitEnemy) Fx::Blood(shot.point, shot.direction, shot.headshot);
-                    else if (shot.hit) Fx::Impact(shot.point, shot.normal, shot.surface);
+                    Vector3 ear = c.position, right = player.GetRight();
+                    if (shot.hitEnemy) {
+                        Fx::Blood(shot.point, shot.direction, shot.headshot);
+                        audio.PlayAt(Sfx::FleshHit, shot.point, ear, right, 0.9f);
+                        audio.Play(shot.headshot ? Sfx::Headshot : Sfx::HitTick, 0.7f);
+                    } else if (shot.hit) {
+                        Fx::Impact(shot.point, shot.normal, shot.surface);
+                        audio.PlayImpact(shot.surface, shot.point, ear, right);
+                        if (shot.hitTarget) audio.Play(Sfx::HitTick, 0.5f);
+                    }
                     if (shot.killed) {
+                        audio.Play(Sfx::KillConfirm, 0.7f);
                         killBanner = 1.6f;
                         killBannerHeadshot = shot.headshot;
                         addFeed(shot.headshot ? "RIVAL ELIMINATED  -  HEADSHOT" : "RIVAL ELIMINATED", { 255, 214, 92, 255 });
                     }
                 }
                 if (!wasReloading && gun.IsReloading()) audio.PlayReload();
+                if (gun.TakeDryFire()) audio.Play(Sfx::DryFire, 0.8f);
+                // Landing thud, louder for longer falls
+                if (player.IsGrounded() && !wasGrounded && lastFallSpeed > 3.0f)
+                    audio.Play(Sfx::Land, Clamp(lastFallSpeed / 9.0f, 0.25f, 0.9f));
+                wasGrounded = player.IsGrounded();
+                lastFallSpeed = -player.GetVerticalVelocity();
                 player.SetZoom(gun.GetAimAmount());
                 viewModel.Update(dt, MotionOf(player), gun);
                 Stance st = player.GetStance();
@@ -173,8 +191,25 @@ int main() {
                     ShotTrace t = TraceShotAtPlayer(shot, target, world);
                     Fx::MuzzleFlash(e.GetMuzzle(), shot.direction);
                     Fx::Tracer(e.GetMuzzle(), t.end, { 255, 210, 140, 255 });
-                    if (t.hitWorld) Fx::Impact(t.end, t.normal, t.surface);
+                    if (t.hitWorld) {
+                        Fx::Impact(t.end, t.normal, t.surface);
+                        audio.PlayImpact(t.surface, t.end, player.GetCamera().position, player.GetRight());
+                    }
+                    // A near miss cracks past the player's head
+                    if (!t.hitPlayer && player.IsAlive()) {
+                        Vector3 head = player.GetCamera().position;
+                        Vector3 along = Vector3Subtract(t.end, shot.position);
+                        float len = Vector3Length(along);
+                        float k = len > 0 ? Clamp(Vector3DotProduct(Vector3Subtract(head, shot.position), along) / (len * len), 0.0f, 1.0f) : 0.0f;
+                        Vector3 closest = Vector3Add(shot.position, Vector3Scale(along, k));
+                        float miss = Vector3Distance(head, closest);
+                        if (miss < 2.0f && k > 0.0f && k < 1.0f) {
+                            float pan = Vector3DotProduct(Vector3Normalize(Vector3Subtract(closest, head)), player.GetRight());
+                            audio.Play(Sfx::BulletCrack, Lerp(0.9f, 0.35f, miss / 2.0f), pan);
+                        }
+                    }
                     if (t.hitPlayer && player.IsAlive()) {
+                        audio.Play(Sfx::Hurt, t.headshot ? 1.0f : 0.8f);
                         hurt = 1.0f;
                         shake = t.headshot ? 1.0f : 0.6f;
                         // Which way the shot came from, relative to the way the player faces
@@ -208,6 +243,12 @@ int main() {
         }
         for (WorldBox& b : world) b.hitFlash = std::max(0.0f, b.hitFlash - dt);
         audio.UpdateFootsteps(player.GetStance(), player.IsAlive() && playing);
+        for (const Enemy& e : enemies) {
+            CharAnim a = e.GetAnim();
+            int moving = (!playing || !e.IsAlive()) ? 0 : (a == CharAnim::Run ? 2 : (a == CharAnim::Walk ? 1 : 0));
+            audio.UpdateEnemyFootsteps(moving, e.GetFeet(), player.GetCamera().position, player.GetRight());
+        }
+        audio.Update();
 
         // ---------- Draw ----------
         // The camera we render from: the player's, plus the visual kick and shake

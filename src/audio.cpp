@@ -1,6 +1,135 @@
 #include "audio.hpp"
 #include "raymath.h"
 #include <cmath>
+#include <vector>
+
+// --- Synthesis ------------------------------------------------------------------
+// Small helpers for building effects out of decaying tones and filtered noise.
+namespace {
+const int RATE = 44100;
+
+struct Synth {
+    std::vector<float> s;
+    unsigned seed = 12345;
+    explicit Synth(float seconds) : s((size_t)(seconds * RATE), 0.0f) {}
+    float Noise() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return (seed & 0xFFFFFF) / 8388608.0f - 1.0f; }
+    float T(size_t i) const { return (float)i / RATE; }
+
+    // A decaying sine, optionally sliding in pitch (freq -> freq * slide over the sound)
+    void Tone(float freq, float amp, float decay, float start = 0.0f, float slide = 1.0f) {
+        double phase = 0;
+        float length = s.size() / (float)RATE;
+        for (size_t i = (size_t)(start * RATE); i < s.size(); i++) {
+            float t = T(i) - start;
+            float f = freq * powf(slide, t / length);
+            phase += 2.0 * PI * f / RATE;
+            s[i] += amp * expf(-t * decay) * (float)sin(phase);
+        }
+    }
+    // A burst of noise through a simple low-pass (cut 0..1) and optional high-pass
+    void NoiseBurst(float amp, float decay, float lowCut, float highCut = 0.0f, float start = 0.0f) {
+        float lp = 0, hp = 0, prev = 0;
+        for (size_t i = (size_t)(start * RATE); i < s.size(); i++) {
+            float t = T(i) - start;
+            lp += (Noise() - lp) * lowCut;
+            float v = lp;
+            if (highCut > 0.0f) { hp = highCut * (hp + v - prev); prev = v; v = hp; }
+            s[i] += amp * expf(-t * decay) * v;
+        }
+    }
+    Sound Make(float peak) {
+        float loudest = 0.0f;
+        for (float v : s) loudest = fmaxf(loudest, fabsf(v));
+        if (loudest > 0.0f) for (float& v : s) v *= peak / loudest;
+        // short fade-in/out so nothing clicks
+        for (size_t i = 0; i < 64 && i < s.size(); i++) { s[i] *= i / 64.0f; s[s.size() - 1 - i] *= i / 64.0f; }
+        Wave w{};
+        w.frameCount = (unsigned)s.size();
+        w.sampleRate = RATE;
+        w.sampleSize = 32;
+        w.channels = 1;
+        w.data = s.data();
+        return LoadSoundFromWave(w); // copies the data
+    }
+};
+
+Sound MakeSfx(Sfx kind) {
+    switch (kind) {
+    case Sfx::ImpactConcrete: { // a dry crack and a puff of grit
+        Synth x(0.22f);
+        x.NoiseBurst(1.0f, 55.0f, 0.55f, 0.85f);
+        x.NoiseBurst(0.6f, 25.0f, 0.12f);
+        x.Tone(140.0f, 0.35f, 35.0f, 0.0f, 0.6f);
+        return x.Make(0.85f);
+    }
+    case Sfx::ImpactSteel: {    // a bright, ringing ping off sheet metal
+        Synth x(0.6f);
+        x.NoiseBurst(0.5f, 90.0f, 0.8f, 0.9f);
+        const float base = 1180.0f;
+        x.Tone(base, 0.55f, 9.0f);
+        x.Tone(base * 2.76f, 0.35f, 13.0f);
+        x.Tone(base * 5.40f, 0.20f, 20.0f);
+        x.Tone(base * 8.93f, 0.12f, 30.0f);
+        return x.Make(0.75f);
+    }
+    case Sfx::FleshHit: {       // a heavy, muffled thwack
+        Synth x(0.18f);
+        x.Tone(110.0f, 1.0f, 28.0f, 0.0f, 0.5f);
+        x.NoiseBurst(0.8f, 40.0f, 0.18f);
+        return x.Make(0.9f);
+    }
+    case Sfx::HitTick: {        // the hit marker: a crisp, short tick
+        Synth x(0.07f);
+        x.Tone(2900.0f, 1.0f, 85.0f);
+        x.NoiseBurst(0.5f, 160.0f, 0.9f, 0.9f);
+        return x.Make(0.6f);
+    }
+    case Sfx::Headshot: {       // a bright ding on top of the tick
+        Synth x(0.45f);
+        x.Tone(2900.0f, 0.6f, 85.0f);
+        x.Tone(1960.0f, 0.8f, 9.0f);
+        x.Tone(2940.0f, 0.45f, 12.0f);
+        x.Tone(3920.0f, 0.25f, 16.0f);
+        return x.Make(0.6f);
+    }
+    case Sfx::KillConfirm: {    // two quick rising notes
+        Synth x(0.45f);
+        x.Tone(660.0f, 0.7f, 14.0f);
+        x.Tone(1320.0f, 0.25f, 18.0f);
+        x.Tone(990.0f, 0.8f, 9.0f, 0.09f);
+        x.Tone(1980.0f, 0.25f, 12.0f, 0.09f);
+        return x.Make(0.55f);
+    }
+    case Sfx::BulletCrack: {    // a supersonic snap as a round passes close by
+        Synth x(0.16f);
+        x.NoiseBurst(1.0f, 70.0f, 0.95f, 0.95f);
+        x.Tone(2400.0f, 0.35f, 30.0f, 0.0f, 0.3f);
+        return x.Make(0.8f);
+    }
+    case Sfx::Hurt: {           // a dull body blow
+        Synth x(0.35f);
+        x.Tone(75.0f, 1.0f, 12.0f, 0.0f, 0.7f);
+        x.NoiseBurst(0.7f, 18.0f, 0.06f);
+        return x.Make(0.95f);
+    }
+    case Sfx::DryFire: {        // the hammer falling on an empty chamber
+        Synth x(0.12f);
+        x.NoiseBurst(0.7f, 140.0f, 0.9f, 0.8f);
+        x.Tone(3400.0f, 0.5f, 120.0f);
+        x.NoiseBurst(0.5f, 160.0f, 0.9f, 0.8f, 0.035f);
+        x.Tone(2600.0f, 0.4f, 120.0f, 0.035f);
+        return x.Make(0.5f);
+    }
+    case Sfx::Land: {           // boots hitting the ground
+        Synth x(0.2f);
+        x.NoiseBurst(1.0f, 30.0f, 0.09f);
+        x.Tone(60.0f, 0.8f, 22.0f);
+        return x.Make(0.8f);
+    }
+    default: return Sound{};
+    }
+}
+} // namespace
 
 // Load a sound, cut the silence off its start (and optionally its end), and
 // scale it so its loudest moment is at `peak`. The source recordings vary a
@@ -50,13 +179,82 @@ bool GameAudio::Load(const std::string& assetDir) {
         return false;
     }
     for (Sound& v : gunshotVoices) v = LoadSoundAlias(gunshot);
+    enemyWalk = LoadSoundAlias(walk);
+    enemyRun = LoadSoundAlias(run);
+    for (int k = 0; k < (int)Sfx::Count; k++) {
+        sfx[k] = MakeSfx((Sfx)k);
+        for (Sound& v : sfxVoices[k]) v = LoadSoundAlias(sfx[k]);
+    }
+
+    // Ambience: a quiet wind bed, streamed and looping
+    wind = LoadMusicStream((dir + "wind.wav").c_str());
+    windLoaded = IsMusicValid(wind);
+    if (windLoaded) {
+        SetMusicVolume(wind, 0.22f);
+        PlayMusicStream(wind);
+    }
     return true;
 }
 
 void GameAudio::Unload() {
     for (Sound& v : gunshotVoices) if (IsSoundValid(v)) UnloadSoundAlias(v);
+    for (Sound* a : { &enemyWalk, &enemyRun }) if (IsSoundValid(*a)) UnloadSoundAlias(*a);
+    for (int k = 0; k < (int)Sfx::Count; k++) {
+        for (Sound& v : sfxVoices[k]) if (IsSoundValid(v)) UnloadSoundAlias(v);
+        if (IsSoundValid(sfx[k])) UnloadSound(sfx[k]);
+    }
     for (Sound* s : { &gunshot, &reload, &walk, &run }) if (IsSoundValid(*s)) UnloadSound(*s);
+    if (windLoaded) UnloadMusicStream(wind);
     *this = GameAudio{};
+}
+
+void GameAudio::Update() {
+    if (windLoaded) UpdateMusicStream(wind);
+}
+
+void GameAudio::Play(Sfx s, float volume, float pan) {
+    if (!loaded) return;
+    int k = (int)s;
+    Sound& v = sfxVoices[k][sfxNext[k]];
+    sfxNext[k] = (sfxNext[k] + 1) % SFX_VOICES;
+    SetSoundVolume(v, Clamp(volume, 0.0f, 1.0f));
+    SetSoundPan(v, 0.5f - 0.5f * Clamp(pan, -1.0f, 1.0f));
+    SetSoundPitch(v, GetRandomValue(94, 106) / 100.0f);
+    PlaySound(v);
+}
+
+// Volume falls off with distance (half at 6 m); pan from the listener's right
+static void Spatial(Vector3 source, Vector3 ear, Vector3 right, float& volume, float& pan) {
+    Vector3 to = Vector3Subtract(source, ear);
+    float dist = Vector3Length(to);
+    volume /= 1.0f + dist / 6.0f;
+    pan = dist > 0.01f ? Vector3DotProduct(Vector3Scale(to, 1.0f / dist), right) * 0.8f : 0.0f;
+}
+
+void GameAudio::PlayAt(Sfx s, Vector3 source, Vector3 ear, Vector3 right, float volume) {
+    float pan;
+    Spatial(source, ear, right, volume, pan);
+    Play(s, volume, pan);
+}
+
+void GameAudio::PlayImpact(Surface surface, Vector3 at, Vector3 ear, Vector3 right) {
+    PlayAt(surface == Surface::Steel ? Sfx::ImpactSteel : Sfx::ImpactConcrete, at, ear, right, 0.9f);
+}
+
+void GameAudio::UpdateEnemyFootsteps(int moving, Vector3 source, Vector3 ear, Vector3 right) {
+    if (!loaded) return;
+    if (moving != 1 && IsSoundPlaying(enemyWalk)) PauseSound(enemyWalk);
+    if (moving != 2 && IsSoundPlaying(enemyRun)) PauseSound(enemyRun);
+    if (moving == 0) return;
+    Sound& s = moving == 1 ? enemyWalk : enemyRun;
+    float volume = 0.9f, pan;
+    Spatial(source, ear, right, volume, pan);
+    SetSoundVolume(s, volume);
+    SetSoundPan(s, 0.5f - 0.5f * pan);
+    if (!IsSoundPlaying(s)) {
+        ResumeSound(s);
+        if (!IsSoundPlaying(s)) PlaySound(s);
+    }
 }
 
 void GameAudio::PlayGunshot(float volume, float pan) {
