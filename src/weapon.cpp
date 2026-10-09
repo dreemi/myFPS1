@@ -62,10 +62,7 @@ void Weapon::Tick(float dt, Stance stance) {
     hitMarker = std::max(0.0f, hitMarker - dt);
     recoil = std::max(0.0f, recoil - dt * 6.0f);
 
-    for (Impact& i : impacts) i.life -= dt;
-    impacts.erase(std::remove_if(impacts.begin(), impacts.end(),
-                                 [](const Impact& i) { return i.life <= 0.0f; }),
-                  impacts.end());
+
 
     if (reloadTimer > 0.0f) {
         reloadTimer -= dt;
@@ -90,21 +87,24 @@ bool Weapon::Update(float dt, const Camera3D& camera, World& world, std::vector<
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && cooldownTimer <= 0.0f) {
         if (ammo > 0) {
-            Fire(camera, world, enemies);
+            lastShot = Fire(camera, world, enemies);
             return true;
         }
+        dryFire = true;
         StartReload(); // auto-reload on empty click
     }
     return false;
 }
 
-void Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies) {
+ShotResult Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies) {
     ammo--;
     cooldownTimer = def->fireCooldown;
     muzzleFlash = 0.05f;
     recoil = 1.0f;
 
     Ray ray = ShotRay(camera);
+    ShotResult result;
+    result.direction = ray.direction;
 
     // Find the closest box the ray hits
     WorldBox* closest = nullptr;
@@ -116,6 +116,18 @@ void Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enem
         if (hit.hit && hit.distance < closestHit.distance) {
             closestHit = hit;
             closest = &box;
+        }
+    }
+    // The ground stops bullets too
+    bool ground = false;
+    if (ray.direction.y < -1e-4f) {
+        float t = -ray.position.y / ray.direction.y;
+        if (t > 0.0f && t < closestHit.distance) {
+            closestHit.distance = t;
+            closestHit.point = Vector3Add(ray.position, Vector3Scale(ray.direction, t));
+            closestHit.normal = { 0, 1, 0 };
+            closest = nullptr;
+            ground = true;
         }
     }
 
@@ -135,30 +147,27 @@ void Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enem
         lastHitHeadshot = headshot;
         if (lastHitKilled) kills++;
         hitMarker = lastHitKilled ? 0.3f : 0.12f;
-        return;
+        result.hit = result.hitEnemy = true;
+        result.headshot = headshot;
+        result.killed = lastHitKilled;
+        result.point = Vector3Add(ray.position, Vector3Scale(ray.direction, closestHit.distance));
+        return result;
     }
 
-    if (!closest) return;
+    if (!closest && !ground) return result;
+    result.hit = true;
+    result.point = closestHit.point;
+    result.normal = closestHit.normal;
+    result.surface = ground ? Surface::Concrete : closest->surface;
 
-    // Nudge the marker slightly off the surface so it isn't z-fighting
-    Vector3 p = Vector3Add(closestHit.point, Vector3Scale(closestHit.normal, 0.01f));
-    impacts.push_back({ p, 3.0f });
-
-    if (closest->isTarget) {
+    if (closest && closest->isTarget) {
         closest->hitFlash = 0.15f;
         hitMarker = 0.12f;
         lastHitKilled = false;
         lastHitHeadshot = false;
-        TraceLog(LOG_INFO, "Hit target at (%.2f, %.2f, %.2f), distance %.2f",
-                 closestHit.point.x, closestHit.point.y, closestHit.point.z, closestHit.distance);
+        result.hitTarget = true;
     }
-}
-
-void Weapon::Draw3D() const {
-    for (const Impact& i : impacts) {
-        float alpha = std::min(1.0f, i.life);
-        DrawSphere(i.point, 0.04f, Fade(DARKGRAY, alpha));
-    }
+    return result;
 }
 
 void Weapon::DrawHUD(int w, int h, float fovy) const {

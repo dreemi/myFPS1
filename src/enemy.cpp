@@ -27,12 +27,25 @@ EnemyTarget MakeTarget(Vector3 feet, float eyeHeight) {
 ShotTrace TraceShotAtPlayer(Ray ray, const EnemyTarget& target, const World& world) {
     const float maxRange = 100.0f;
     float wallDist = maxRange;
+    ShotTrace result;
     for (const WorldBox& box : world) {
         RayCollision hit = GetRayCollisionBox(ray, box.Bounds());
-        if (hit.hit && hit.distance < wallDist) wallDist = hit.distance;
+        if (hit.hit && hit.distance < wallDist) {
+            wallDist = hit.distance;
+            result.hitWorld = true;
+            result.normal = hit.normal;
+            result.surface = box.surface;
+        }
     }
-
-    ShotTrace result;
+    if (ray.direction.y < -1e-4f) { // the ground
+        float t = -ray.position.y / ray.direction.y;
+        if (t > 0.0f && t < wallDist) {
+            wallDist = t;
+            result.hitWorld = true;
+            result.normal = { 0, 1, 0 };
+            result.surface = Surface::Concrete;
+        }
+    }
     result.end = Vector3Add(ray.position, Vector3Scale(ray.direction, wallDist));
     if (!target.alive) return result;
 
@@ -45,6 +58,7 @@ ShotTrace TraceShotAtPlayer(Ray ray, const EnemyTarget& target, const World& wor
     float best = wallDist;
     if (b.hit && b.distance < best) { best = b.distance; result.hitPlayer = true; result.headshot = false; result.end = b.point; }
     if (h.hit && h.distance < best) { best = h.distance; result.hitPlayer = true; result.headshot = true; result.end = h.point; }
+    if (result.hitPlayer) result.hitWorld = false;
     return result;
 }
 

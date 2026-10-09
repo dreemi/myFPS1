@@ -103,14 +103,7 @@ static const Color SLEEVE = { 62, 74, 60, 255 };
 static void DrawRevolverFirstPerson(const ViewModelPose& pose) {
     DrawRevolverMesh(REV_FIRST_PERSON_SCALE);
 
-    if (pose.muzzleFlash) {
-        // Smaller when aiming so it doesn't hide what you're shooting at
-        Vector3 muzzle = Vector3Transform(REV_MUZZLE, RevolverToGun(REV_FIRST_PERSON_SCALE));
-        float s = Lerp(1.0f, 0.5f, pose.aim);
-        DrawSphere(Vector3Add(muzzle, { 0, 0, -0.03f }), 0.035f * s, Fade(YELLOW, 0.9f));
-        DrawSphere(Vector3Add(muzzle, { 0, 0, -0.025f }), 0.020f * s, WHITE);
-    }
-    if (!pose.boxHands) return; // the ViewModel draws the character's real arms
+    if (!pose.boxHands) return; // the ViewModel draws the character's real arms (and the flash)
 
     // Fallback box hands. Reload: the support hand drops away and comes back
     float reloadArc = pose.reloading ? sinf(PI * pose.reload) : 0.0f;
@@ -142,12 +135,8 @@ static void DrawRevolverFirstPerson(const ViewModelPose& pose) {
 // ---------------------------------------------------------------------------
 
 static void DrawRevolverWorld(bool muzzleFlash) {
+    (void)muzzleFlash; // the flash is an effect spawned when it fires (see Fx::MuzzleFlash)
     DrawRevolverMesh(REV_WORLD_SCALE);
-    if (muzzleFlash) {
-        Vector3 muzzle = Vector3Transform(REV_MUZZLE, RevolverToGun(REV_WORLD_SCALE));
-        DrawSphere(muzzle, 0.12f, Fade(YELLOW, 0.9f));
-        DrawSphere(muzzle, 0.06f, WHITE);
-    }
 }
 
 const WeaponModels REVOLVER_MODELS = {
@@ -159,5 +148,6 @@ const WeaponModels REVOLVER_MODELS = {
     Vector3Transform(REV_FRONT_SIGHT, RevolverToGun(REV_FIRST_PERSON_SCALE)), // front sight (gun space)
     Vector3Transform(REV_REAR_NOTCH, RevolverToGun(REV_FIRST_PERSON_SCALE)),  // rear notch (gun space)
     { 0.0f, -0.050f, 0.016f },                                         // hand grip: palm centre, down the grip
+    Vector3Transform(REV_MUZZLE, RevolverToGun(REV_FIRST_PERSON_SCALE)),     // first-person muzzle (gun space)
     Vector3Transform(REV_MUZZLE, RevolverToGun(REV_WORLD_SCALE)),            // world model muzzle (gun space)
 };

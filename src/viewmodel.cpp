@@ -1,6 +1,7 @@
 #include "viewmodel.hpp"
 #include "raymath.h"
 #include "rlgl.h"
+#include "effects.hpp"
 
 // raylib has no depth-only clear, so call OpenGL's directly (OpenGL 1.1, always available)
 #if defined(_WIN32)
@@ -139,5 +140,11 @@ void ViewModel::Draw(const Weapon& weapon) const {
                 DrawCharacter(*arms, CharAnim::FpHold, frame, toGun, PART_FOREARMS, WHITE);
             }
         rlPopMatrix();
+        if (weapon.IsMuzzleFlashing()) {
+            // Smaller when aiming so it doesn't hide what you're shooting at
+            Vector3 muzzle = Vector3Transform(Vector3Add(models->fpMuzzle, { 0, 0, -0.04f }), GunToCamera(weapon));
+            float size = Lerp(0.30f, 0.16f, weapon.GetAimAmount());
+            Fx::DrawFlashSprite(cam, muzzle, size, (float)(weapon.GetAmmo() * 67 % 360), 1.0f);
+        }
     EndMode3D();
 }

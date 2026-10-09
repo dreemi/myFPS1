@@ -8,6 +8,7 @@
 #include "audio.hpp"
 #include "character.hpp"
 #include "render.hpp"
+#include "effects.hpp"
 #include "raymath.h"
 #include "rlgl.h"
 #include <algorithm>
@@ -37,6 +38,7 @@ int main() {
 
     // Lighting: one lit shader for the level, characters and guns
     Render::Init(assetDir);
+    Fx::Init();
     Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
     SetWeaponModelShader(Render::LitShader());
@@ -64,9 +66,6 @@ int main() {
     float damageFlash = 0.0f;  // red screen tint after being hit
     float deathTimer = 0.0f;   // > 0 while showing "YOU DIED"
 
-    // Enemy bullet streaks, so you can see where shots come from
-    struct Tracer { Vector3 from, to; float life; };
-    std::vector<Tracer> tracers;
 
     // Respawn at whichever spawn is farther from the enemies
     auto respawnPlayer = [&]() {
@@ -100,7 +99,19 @@ int main() {
             if (player.IsAlive()) {
                 player.Update(dt, world);
                 bool wasReloading = gun.IsReloading();
-                if (gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance())) audio.PlayGunshot(0.8f, 0.0f);
+                if (gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance())) {
+                    audio.PlayGunshot(0.8f, 0.0f);
+                    // Effects: a tracer from roughly where the gun is, then whatever it hit
+                    const ShotResult& shot = gun.LastShot();
+                    const Camera3D& c = player.GetCamera();
+                    Vector3 fwd = player.GetLookDirection();
+                    Vector3 gunTip = Vector3Add(c.position, Vector3Add(Vector3Scale(fwd, 0.7f),
+                                        Vector3Add(Vector3Scale(player.GetRight(), 0.17f * (1.0f - gun.GetAimAmount())), { 0, -0.12f, 0 })));
+                    Vector3 end = shot.hit ? shot.point : Vector3Add(c.position, Vector3Scale(shot.direction, 80.0f));
+                    Fx::Tracer(gunTip, end, { 255, 220, 160, 140 });
+                    if (shot.hitEnemy) Fx::Blood(shot.point, shot.direction, shot.headshot);
+                    else if (shot.hit) Fx::Impact(shot.point, shot.normal, shot.surface);
+                }
                 if (!wasReloading && gun.IsReloading()) audio.PlayReload();
                 player.SetZoom(gun.GetAimAmount());
                 viewModel.Update(dt, MotionOf(player), gun);
@@ -124,7 +135,9 @@ int main() {
                 for (const Ray& shot : e.TakeShots()) {
                     audio.PlayGunshotAt(e.GetMuzzle(), player.GetCamera().position, player.GetRight());
                     ShotTrace t = TraceShotAtPlayer(shot, target, world);
-                    tracers.push_back({ e.GetMuzzle(), t.end, 0.08f });
+                    Fx::MuzzleFlash(e.GetMuzzle(), shot.direction);
+                    Fx::Tracer(e.GetMuzzle(), t.end, { 255, 210, 140, 255 });
+                    if (t.hitWorld) Fx::Impact(t.end, t.normal, t.surface);
                     if (t.hitPlayer && player.IsAlive()) {
                         damageFlash = t.headshot ? 0.6f : 0.4f;
                         if (player.TakeDamage(t.headshot ? REVOLVER.headDamage : REVOLVER.bodyDamage)) {
@@ -136,9 +149,7 @@ int main() {
                     }
                 }
             }
-            for (Tracer& t : tracers) t.life -= dt;
-            tracers.erase(std::remove_if(tracers.begin(), tracers.end(), [](const Tracer& t) { return t.life <= 0; }),
-                          tracers.end());
+            Fx::Update(dt);
             damageFlash = std::max(0.0f, damageFlash - dt);
         }
         for (WorldBox& b : world) b.hitFlash = std::max(0.0f, b.hitFlash - dt);
@@ -206,8 +217,7 @@ int main() {
             drawTargets();
             for (const Enemy& e : enemies) e.Draw(&character);
             drawPlayerBody(PART_LEGS);
-            for (const Tracer& t : tracers) DrawLine3D(t.from, t.to, Fade(YELLOW, t.life / 0.08f));
-            gun.Draw3D();
+            Fx::Draw(cam);
         Render::EndWorldPass();
 
         // 3. First-person weapon: its own pass on top of the world, lit like the
@@ -269,6 +279,7 @@ int main() {
     UnloadModel(unitCube);
     UnloadModel(spawnPad);
     Render::Shutdown();
+    Fx::Shutdown();
     UnloadGroundModel(ground);
     UnloadWeaponModelAssets();
     UnloadWorldMaterials(materials);

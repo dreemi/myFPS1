@@ -32,6 +32,7 @@ struct WeaponModels {
     Vector3 frontSightTop;  // gun space: top of the front sight post
     Vector3 rearNotch;      // gun space: middle of the rear sight notch
     Vector3 handGrip;       // gun space: where the shooting hand's palm centre sits on the grip
+    Vector3 fpMuzzle;       // gun space: tip of the first-person model's barrel
     // World model
     Vector3 worldMuzzle;    // gun space: tip of the world model's barrel
 };

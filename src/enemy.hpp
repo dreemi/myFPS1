@@ -32,6 +32,9 @@ struct ShotTrace {
     bool hitPlayer = false;
     bool headshot = false;
     Vector3 end{};  // where the bullet stopped (player, wall, or max range)
+    bool hitWorld = false;            // stopped by a wall, cover or the ground
+    Vector3 normal{};                 // surface normal there
+    Surface surface = Surface::Plain;
 };
 // Follows an enemy bullet: hits the player unless a wall or cover is in the way
 ShotTrace TraceShotAtPlayer(Ray ray, const EnemyTarget& target, const World& world);

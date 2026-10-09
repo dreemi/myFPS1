@@ -30,6 +30,19 @@ struct WeaponDef {
 // Enemies have 100 health: 4 body shots or 2 headshots to kill
 extern const WeaponDef REVOLVER;
 
+// What one shot hit (for effects and sounds; damage is already applied)
+struct ShotResult {
+    bool hit = false;          // hit anything at all
+    bool hitEnemy = false;
+    bool headshot = false;
+    bool killed = false;
+    bool hitTarget = false;    // a practice target
+    Vector3 point{};
+    Vector3 normal{};          // surface normal (world hits)
+    Vector3 direction{};       // the bullet's direction
+    Surface surface = Surface::Plain;
+};
+
 // One weapon being carried: ammo, timers, recoil, spread, aiming
 class Weapon {
 public:
@@ -41,7 +54,9 @@ public:
     void Tick(float dt, Stance stance);
     bool StartReload(); // false if already reloading or the magazine is full
     // Fires one shot from the camera within the current spread (no input/cooldown checks)
-    void Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies);
+    ShotResult Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies);
+    const ShotResult& LastShot() const { return lastShot; } // the shot Update fired this frame
+    bool TakeDryFire() { bool d = dryFire; dryFire = false; return d; } // clicked on empty?
     // A random bullet path: straight ahead, tilted by up to the current spread
     Ray ShotRay(const Camera3D& camera);
 
@@ -61,15 +76,9 @@ public:
     bool IsMuzzleFlashing() const { return muzzleFlash > 0.0f; }
     int GetKills() const { return kills; }
 
-    void Draw3D() const;  // bullet impact marks in the world
     void DrawHUD(int screenW, int screenH, float fovy) const; // crosshair, hit marker, ammo, kills
 
 private:
-    struct Impact {
-        Vector3 point;
-        float life;
-    };
-
     const WeaponDef* def;
     int ammo;
     float cooldownTimer = 0.0f;
@@ -87,5 +96,6 @@ private:
     bool lastHitHeadshot = false; // draws the marker in yellow
     int kills = 0;
 
-    std::vector<Impact> impacts;
+    ShotResult lastShot;
+    bool dryFire = false;
 };

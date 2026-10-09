@@ -446,7 +446,7 @@ int main() {
         for (int i = 0; i < 60; i++) vm.Update(DT, still, pistol);
         // The world camera; shots go straight down its view axis
         Vector3 eye = { 3, 1.7f, -2 };
-        Vector3 forward = Vector3Normalize({ 0.3f, -0.2f, 1 });
+        Vector3 forward = Vector3Normalize({ 0.3f, 0.0f, 1 }); // level, so the target stands on the ground
         Camera3D cam = CameraAt(eye, Vector3Add(eye, forward));
 
         // The viewmodel is drawn in camera space, so "dead center" is the -Z axis
