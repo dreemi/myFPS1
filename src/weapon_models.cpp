@@ -456,7 +456,7 @@ WeaponModels FAL_MODELS = {
     1.0f,                            // life size
     { 0.10f, -0.19f, -0.10f },       // hip offset (camera space): stock tucked under the arm, close to the chest
     -2.5f,                           // hip yaw
-    0.16f,                           // aim distance: cheek on the stock, the eye a few cm behind the rear peep
+    0.19f,                           // aim distance: cheek on the stock, the eye behind the rear ring
     { 0.0f, 0.098f, -0.562f },       // front sight (gun space; refreshed from fal.txt)
     { 0.0f, 0.098f, 0.056f },        // rear sight
     { 0.0f, -0.050f, 0.031f },       // hand grip

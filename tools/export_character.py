@@ -640,7 +640,7 @@ make_action("fp_hold", REV_FRAMES, fp_hold_pose)
 # --- The FAL ------------------------------------------------------------------------------
 FAL = read_gun_txt("fal")
 FAL_RIG = FpRig(1.0, (0.10, -0.19, -0.10), -2.5, tuple(FAL["hand_grip"]),
-                (0.0, -FAL["front_sight"].y, -0.16))
+                (0.0, -FAL["front_sight"].y, -0.19))
 FAL_FRAMES = 131
 SWAP_FIRST, SWAP_LAST, SWAP_END = 1, 60, 2.0
 TAC_FIRST, TAC_LAST, TAC_END = 61, 78, 2.6
@@ -747,10 +747,13 @@ def fp_rifle_pose(ph, f):
         FAL_LEFT_EMPTY = fal_left_keys(True)
         reset()
 
-    def support_hold(cam):
+    def support_hold(cam, aim=0.0):
         hold_rifle_right(cam)
         grip_hand("l", tight=True)
-        p, fi, n = FAL_RIG.key_in_blender((0, "gun") + FAL_SUPPORT, cam)
+        # Aimed, the arm is reaching further: the hand slides back along the handguard
+        palm, fingers, normal = FAL_SUPPORT
+        palm = (palm[0], palm[1], palm[2] + 0.07 * aim)
+        p, fi, n = FAL_RIG.key_in_blender((0, "gun", palm, fingers, normal), cam)
         miss = place_left(p, fi, n, Vector((0.5, 0.2, -1.0)))
         if miss > 0.01:
             log("fp_rifle frame %d: support hand misses the handguard by %.0f mm" % (f, miss * 1000))
@@ -763,7 +766,7 @@ def fp_rifle_pose(ph, f):
 
     if f >= FAL_ADS_FIRST:
         aim = (f - FAL_ADS_FIRST) / (FAL_FRAMES - 1 - FAL_ADS_FIRST)
-        support_hold(FAL_RIG.gun_in_camera(aim=aim))
+        support_hold(FAL_RIG.gun_in_camera(aim=aim), aim)
     elif SWAP_FIRST <= f <= EMPTY_LAST:
         if f <= SWAP_LAST:
             t, keys, left = (f - SWAP_FIRST) / (SWAP_LAST - SWAP_FIRST) * SWAP_END, FAL_SWAP, FAL_LEFT_TAC

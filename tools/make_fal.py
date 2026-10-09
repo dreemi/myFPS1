@@ -138,8 +138,8 @@ parts.append(finish(cyl_y("gastube", 0.0065, 0.19, 0.55, 0, ZB + 0.021, M_PARK, 
 parts.append(finish(box("gasblock", -0.011, 0.011, 0.545, 0.585, ZB - 0.012, ZB + 0.022, M_PARK), 0.0015))
 parts.append(finish(cyl_y("regulator", 0.006, 0.585, 0.605, 0, ZB + 0.020, M_PARK, seg=16), 0.0008))
 for s in (-1, 1):
-    x0, x1 = sorted((s * 0.004, s * 0.0085))
-    parts.append(finish(box("fear", x0, x1, 0.552, 0.572, ZB + 0.022, SIGHT + 0.006, M_PARK), 0.001))
+    x0, x1 = sorted((s * 0.0045, s * 0.0070))
+    parts.append(finish(box("fear", x0, x1, 0.552, 0.572, ZB + 0.022, SIGHT - 0.003, M_PARK), 0.001))  # ears below the post's tip
 parts.append(finish(box("fpost", -0.0012, 0.0012, 0.558, 0.566, ZB + 0.022, SIGHT, M_PARK), 0.0003))
 hider = cyl_y("hider", 0.0115, 0.700, Y_MUZZLE, 0, ZB, M_PARK, seg=32)
 cut = [cyl_y("hbore", 0.0085, 0.70, Y_MUZZLE + 0.01, 0, ZB, M_BORE, seg=24)]
@@ -157,14 +157,13 @@ for s in (-1, 1):
     for y0 in (0.30, 0.36):
         x0, x1 = sorted((s * 0.0255, s * 0.0268))
         parts.append(finish(box("vent", x0, x1, y0, y0 + 0.03, ZB + 0.008, ZB + 0.016, M_BORE), 0.0))
-# Rear sight: a peep in a protected leaf
-parts.append(finish(box("rbase", -0.008, 0.008, -0.068, -0.040, 0.080, 0.090, M_PARK), 0.0015))
-leaf = box("leaf", -0.006, 0.006, -0.058, -0.054, 0.088, 0.106, M_PARK)
-boolean(leaf, [cyl_y("peep", 0.0018, -0.07, -0.04, 0, SIGHT, M_BORE, seg=16)])
-parts.append(finish(leaf, 0.0006))
-for s in (-1, 1):
-    x0, x1 = sorted((s * 0.007, s * 0.010))
-    parts.append(finish(box("rear", x0, x1, -0.066, -0.046, 0.083, 0.104, M_PARK), 0.001))
+# Rear sight: a thin aperture ring on a short stem (a ghost ring: the eye looks through it
+# rather than at it); nothing either side to block the view
+parts.append(finish(box("rbase", -0.006, 0.006, -0.066, -0.046, 0.080, 0.086, M_PARK), 0.0015))
+parts.append(finish(box("rstem", -0.0012, 0.0012, -0.0570, -0.0550, 0.085, SIGHT - 0.0044, M_PARK), 0.0))
+ring = cyl_y("ring", 0.0049, -0.0572, -0.0552, 0, SIGHT, M_PARK, seg=32)
+boolean(ring, [cyl_y("peep", 0.0042, -0.07, -0.04, 0, SIGHT, M_BORE, seg=32)])
+parts.append(finish(ring, 0.0002))
 # Carry handle, up (T48): a post on the left and a wooden grip above the receiver
 parts.append(finish(box("hpost", -0.023, -0.018, 0.252, 0.262, 0.060, 0.126, M_PARK), 0.0012))
 parts.append(finish(box("harm", -0.023, -0.018, 0.150, 0.262, 0.118, 0.126, M_PARK), 0.0012))
