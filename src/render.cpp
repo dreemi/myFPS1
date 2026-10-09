@@ -23,8 +23,9 @@ static bool ready = false;
 static Shader lit{}, sky{};
 static RenderTexture2D shadowMap{};
 static Matrix lightVP = MatrixIdentity();
-static Model concrete{}, steel{};
-static float concreteTile = 3.0f, steelTile = 2.0f;
+// The level: one merged model per surface kind
+struct LevelPart { Model model; SurfaceLook look; };
+static std::vector<LevelPart> level;
 
 static int Loc(Shader s, const char* name) { return GetShaderLocation(s, name); }
 static void SetVec3(Shader s, const char* name, Vector3 v) { SetShaderValue(s, Loc(s, name), &v, SHADER_UNIFORM_VEC3); }
@@ -76,8 +77,8 @@ static void UnloadKeepTextures(Model& m) {
 }
 
 void Shutdown() {
-    if (concrete.meshCount) UnloadKeepTextures(concrete);
-    if (steel.meshCount) UnloadKeepTextures(steel);
+    for (LevelPart& p : level) UnloadKeepTextures(p.model);
+    level.clear();
     if (shadowMap.id) rlUnloadFramebuffer(shadowMap.id);
     if (shadowMap.depth.id) rlUnloadTexture(shadowMap.depth.id);
     if (IsShaderValid(lit)) UnloadShader(lit);
@@ -101,40 +102,46 @@ void DetachLitShader(Model& model) {
 
 // --- Level geometry ----------------------------------------------------------
 
-static void AddQuad(std::vector<float>& v, std::vector<float>& n, std::vector<unsigned short>& idx, Vector3 c[4], Vector3 normal) {
+static void AddQuad(std::vector<float>& v, std::vector<float>& n, std::vector<float>& uv, std::vector<unsigned short>& idx,
+                    Vector3 c[4], Vector3 normal) {
     unsigned short base = (unsigned short)(v.size() / 3);
+    // Corners go bottom-left, bottom-right, top-right, top-left: the face's own UVs (top of the texture up)
+    static const float FACE_UV[4][2] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 } };
     for (int i = 0; i < 4; i++) {
         v.insert(v.end(), { c[i].x, c[i].y, c[i].z });
         n.insert(n.end(), { normal.x, normal.y, normal.z });
+        uv.insert(uv.end(), { FACE_UV[i][0], FACE_UV[i][1] });
     }
     idx.insert(idx.end(), { base, (unsigned short)(base + 1), (unsigned short)(base + 2), base, (unsigned short)(base + 2), (unsigned short)(base + 3) });
 }
 
 static Model BuildModel(const std::vector<const WorldBox*>& boxes, bool withGround, Texture2D albedo, Texture2D rough,
                         Texture2D normal) {
-    std::vector<float> v, n;
+    std::vector<float> v, n, uv;
     std::vector<unsigned short> idx;
     struct Face { Vector3 n, r, u; };
-    static const Face faces[5] = { // no bottom faces: they sit on the ground
+    static const Face faces[6] = { // the bottom face only for boxes that don't sit on the ground
         { { 1, 0, 0 }, { 0, 0, -1 }, { 0, 1, 0 } }, { { -1, 0, 0 }, { 0, 0, 1 }, { 0, 1, 0 } },
         { { 0, 0, 1 }, { 1, 0, 0 }, { 0, 1, 0 } },  { { 0, 0, -1 }, { -1, 0, 0 }, { 0, 1, 0 } },
-        { { 0, 1, 0 }, { 1, 0, 0 }, { 0, 0, -1 } },
+        { { 0, 1, 0 }, { 1, 0, 0 }, { 0, 0, -1 } }, { { 0, -1, 0 }, { 1, 0, 0 }, { 0, 0, 1 } },
     };
     for (const WorldBox* b : boxes) {
         Vector3 half = Vector3Scale(b->size, 0.5f);
         auto extent = [&](Vector3 a) { return fabsf(a.x) * half.x + fabsf(a.y) * half.y + fabsf(a.z) * half.z; };
+        bool raised = b->position.y - half.y > 0.01f;
         for (const Face& f : faces) {
+            if (f.n.y < 0.0f && !raised) continue;
             Vector3 base = Vector3Add(b->position, Vector3Scale(f.n, extent(f.n)));
             Vector3 r = Vector3Scale(f.r, extent(f.r)), u = Vector3Scale(f.u, extent(f.u));
             Vector3 c[4] = { Vector3Subtract(Vector3Subtract(base, r), u), Vector3Subtract(Vector3Add(base, r), u),
                              Vector3Add(Vector3Add(base, r), u), Vector3Add(Vector3Subtract(base, r), u) };
-            AddQuad(v, n, idx, c, f.n);
+            AddQuad(v, n, uv, idx, c, f.n);
         }
     }
     if (withGround) {
         float hw = ARENA_WIDTH / 2, hl = ARENA_LENGTH / 2;
         Vector3 c[4] = { { -hw, 0, hl }, { hw, 0, hl }, { hw, 0, -hl }, { -hw, 0, -hl } };
-        AddQuad(v, n, idx, c, { 0, 1, 0 });
+        AddQuad(v, n, uv, idx, c, { 0, 1, 0 });
     }
 
     Mesh mesh{};
@@ -142,7 +149,8 @@ static Model BuildModel(const std::vector<const WorldBox*>& boxes, bool withGrou
     mesh.triangleCount = (int)(idx.size() / 3);
     mesh.vertices = (float*)MemAlloc((unsigned)(v.size() * sizeof(float)));
     mesh.normals = (float*)MemAlloc((unsigned)(n.size() * sizeof(float)));
-    mesh.texcoords = (float*)MemAlloc((unsigned)(mesh.vertexCount * 2 * sizeof(float))); // unused: UVs come from world space
+    mesh.texcoords = (float*)MemAlloc((unsigned)(uv.size() * sizeof(float))); // per face (most surfaces map in world space instead)
+    memcpy(mesh.texcoords, uv.data(), uv.size() * sizeof(float));
     mesh.indices = (unsigned short*)MemAlloc((unsigned)(idx.size() * sizeof(unsigned short)));
     memcpy(mesh.vertices, v.data(), v.size() * sizeof(float));
     memcpy(mesh.normals, n.data(), n.size() * sizeof(float));
@@ -159,23 +167,22 @@ static Model BuildModel(const std::vector<const WorldBox*>& boxes, bool withGrou
 
 void BuildLevel(const World& world, const WorldMaterials& mat) {
     if (!ready || !mat.loaded) return;
-    std::vector<const WorldBox*> concreteBoxes, steelBoxes;
-    for (const WorldBox& b : world) {
-        if (b.surface == Surface::Concrete) concreteBoxes.push_back(&b);
-        else if (b.surface == Surface::Steel) steelBoxes.push_back(&b);
+    for (int s = 1; s < (int)Surface::Count; s++) {
+        std::vector<const WorldBox*> boxes;
+        for (const WorldBox& b : world)
+            if ((int)b.surface == s && !b.isTarget) boxes.push_back(&b);
+        bool ground = (Surface)s == Surface::Concrete; // the ground is paved
+        if (boxes.empty() && !ground) continue;
+        const SurfaceLook& look = mat.Of((Surface)s);
+        level.push_back({ BuildModel(boxes, ground, look.albedo, look.rough, look.normal), look });
     }
-    concrete = BuildModel(concreteBoxes, true, mat.concrete, mat.concreteRough, mat.concreteNormal);
-    steel = BuildModel(steelBoxes, false, mat.steel, mat.steelRough, mat.steelNormal);
-    concreteTile = mat.concreteTile;
-    steelTile = mat.steelTile;
 }
 
 void DrawLevel() {
-    if (!concrete.meshCount) return;
-    SurfaceWorldMapped(concreteTile, 0.25f);
-    DrawModel(concrete, { 0, 0, 0 }, 1.0f, WHITE);
-    SurfaceWorldMapped(steelTile, 0.9f);
-    DrawModel(steel, { 0, 0, 0 }, 1.0f, WHITE);
+    for (const LevelPart& p : level) {
+        SurfaceWorldMapped(p.look.tile, p.look.specular, p.look.faceMapped);
+        DrawModel(p.model, { 0, 0, 0 }, 1.0f, p.look.tint);
+    }
     SurfaceObject(0.25f);
 }
 
@@ -268,10 +275,11 @@ void SetViewModelLighting(const Camera3D& worldCam, float sunVisibility) {
     SurfaceObject(0.35f);
 }
 
-void SurfaceWorldMapped(float tileSize, float specular) {
+void SurfaceWorldMapped(float tileSize, float specular, bool faceMapped) {
     if (!ready) return;
     rlDrawRenderBatchActive();
     SetInt(lit, "worldMapped", 1);
+    SetInt(lit, "faceMapped", faceMapped ? 1 : 0);
     SetInt(lit, "materialMode", 0);
     SetFloat(lit, "tileSize", tileSize);
     SetFloat(lit, "specular", specular);

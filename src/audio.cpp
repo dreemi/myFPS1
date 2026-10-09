@@ -72,6 +72,14 @@ Sound MakeSfx(Sfx kind) {
         x.Tone(base * 8.93f, 0.12f, 30.0f);
         return x.Make(0.75f);
     }
+    case Sfx::ImpactWood: {     // a hollow knock and a splintery crackle
+        Synth x(0.25f);
+        x.Tone(210.0f, 0.9f, 30.0f, 0.0f, 0.8f);
+        x.Tone(470.0f, 0.4f, 45.0f);
+        x.NoiseBurst(0.7f, 60.0f, 0.5f, 0.7f);
+        x.NoiseBurst(0.3f, 25.0f, 0.9f, 0.9f, 0.02f);
+        return x.Make(0.8f);
+    }
     case Sfx::FleshHit: {       // a heavy, muffled thwack
         Synth x(0.18f);
         x.Tone(110.0f, 1.0f, 28.0f, 0.0f, 0.5f);
@@ -290,7 +298,10 @@ void GameAudio::PlayAt(Sfx s, Vector3 source, Vector3 ear, Vector3 right, float 
 }
 
 void GameAudio::PlayImpact(Surface surface, Vector3 at, Vector3 ear, Vector3 right) {
-    PlayAt(surface == Surface::Steel ? Sfx::ImpactSteel : Sfx::ImpactConcrete, at, ear, right, 0.9f);
+    Sfx s = Sfx::ImpactConcrete;
+    if (surface == Surface::Steel) s = Sfx::ImpactSteel;
+    else if (surface == Surface::Wood || surface == Surface::Crate || surface == Surface::Painted) s = Sfx::ImpactWood;
+    PlayAt(s, at, ear, right, 0.9f);
 }
 
 void GameAudio::UpdateEnemyFootsteps(int moving, Vector3 source, Vector3 ear, Vector3 right) {

@@ -2,8 +2,8 @@
 #include "raylib.h"
 #include <vector>
 
-// What a box is made of (decides its texture)
-enum class Surface { Plain, Concrete, Steel };
+// What a box is made of (decides its texture, and how bullets hitting it look and sound)
+enum class Surface { Plain, Concrete, Steel, Plaster, Sandstone, Wood, Crate, Sand, Painted, Count };
 
 // A solid axis-aligned box in the world: either a wall or a shootable target.
 struct WorldBox {

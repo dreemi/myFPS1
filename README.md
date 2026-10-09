@@ -1,6 +1,6 @@
 # Dustyard
 
-A small raylib (C++) FPS vertical slice: one revolver, one AI opponent, a three-route yard.
+A small raylib (C++) FPS vertical slice: one revolver, one AI opponent, a sun-baked town with three routes, a catwalk and a balcony.
 
 ## Build
 

@@ -9,7 +9,7 @@ static Texture2D LoadSurfaceTexture(const std::string& colorPath, const std::str
     Image color = LoadImage(colorPath.c_str());
     if (color.data == nullptr) return Texture2D{};
     ImageFormat(&color, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-    Image ao = LoadImage(aoPath.c_str());
+    Image ao = aoPath.empty() ? Image{} : LoadImage(aoPath.c_str());
     if (ao.data != nullptr && ao.width == color.width && ao.height == color.height) {
         ImageFormat(&ao, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
         unsigned char* c = (unsigned char*)color.data;
@@ -42,20 +42,48 @@ static Texture2D LoadDataTexture(const std::string& path) {
 
 WorldMaterials LoadWorldMaterials(const std::string& assetDir) {
     WorldMaterials m;
-    m.concrete = LoadSurfaceTexture(assetDir + "textures/paving_color.jpg", assetDir + "textures/paving_ao.jpg");
-    m.steel = LoadSurfaceTexture(assetDir + "textures/steel_color.jpg", assetDir + "textures/steel_ao.jpg");
-    m.concreteNormal = LoadDataTexture(assetDir + "textures/paving_normal.jpg");
-    m.concreteRough = LoadDataTexture(assetDir + "textures/paving_roughness.jpg");
-    m.steelNormal = LoadDataTexture(assetDir + "textures/steel_normal.jpg");
-    m.steelRough = LoadDataTexture(assetDir + "textures/steel_roughness.jpg");
-    m.loaded = m.concrete.id && m.steel.id && m.concreteNormal.id && m.concreteRough.id && m.steelNormal.id && m.steelRough.id;
-    if (!m.loaded) TraceLog(LOG_WARNING, "MATERIALS: textures missing from %s, using plain colors", assetDir.c_str());
+    std::string dir = assetDir + "textures/";
+    // Photo-scanned sets (ambientCG): colour + AO, normal, roughness
+    auto scanned = [&](Surface s, const char* name, float tile, float specular) {
+        SurfaceLook& l = m.surfaces[(int)s];
+        l.albedo = LoadSurfaceTexture(dir + name + "_color.jpg", dir + name + "_ao.jpg");
+        l.normal = LoadDataTexture(dir + name + "_normal.jpg");
+        l.rough = LoadDataTexture(dir + name + "_roughness.jpg");
+        l.tile = tile;
+        l.specular = specular;
+    };
+    // Generated sets (tools/make_textures.py)
+    auto generated = [&](Surface s, const char* name, float tile, float specular, bool faceMapped, Color tint = WHITE) {
+        SurfaceLook& l = m.surfaces[(int)s];
+        l.albedo = LoadSurfaceTexture(dir + name + "_color.png", "");
+        l.normal = LoadDataTexture(dir + name + "_normal.png");
+        l.rough = LoadDataTexture(dir + name + "_rough.png");
+        l.tile = tile;
+        l.specular = specular;
+        l.faceMapped = faceMapped;
+        l.tint = tint;
+    };
+    scanned(Surface::Concrete, "paving", 3.0f, 0.25f);
+    scanned(Surface::Steel, "steel", 2.0f, 0.9f);
+    generated(Surface::Plaster, "plaster", 3.0f, 0.15f, false);
+    generated(Surface::Sandstone, "sandstone", 2.4f, 0.2f, false);
+    generated(Surface::Wood, "planks", 2.0f, 0.2f, false);
+    generated(Surface::Crate, "crate", 1.0f, 0.2f, true);
+    generated(Surface::Sand, "sand", 4.0f, 0.1f, false);
+    generated(Surface::Painted, "planks", 1.2f, 0.3f, false, { 150, 205, 215, 255 }); // faded teal shutters and doors
+    m.loaded = true;
+    for (int s = 1; s < (int)Surface::Count; s++) {
+        const SurfaceLook& l = m.surfaces[s];
+        if (!l.albedo.id || !l.normal.id || !l.rough.id) m.loaded = false;
+    }
+    if (!m.loaded) TraceLog(LOG_WARNING, "MATERIALS: textures missing from %s, using plain colors", dir.c_str());
     return m;
 }
 
 void UnloadWorldMaterials(WorldMaterials& m) {
-    for (Texture2D t : { m.concrete, m.concreteNormal, m.concreteRough, m.steel, m.steelNormal, m.steelRough })
-        if (t.id) UnloadTexture(t);
+    for (SurfaceLook& l : m.surfaces)
+        for (Texture2D t : { l.albedo, l.normal, l.rough })
+            if (t.id) UnloadTexture(t);
     m = WorldMaterials{};
 }
 
@@ -101,10 +129,10 @@ static void DrawTexturedBox(Vector3 center, Vector3 size, Texture2D tex, float t
 
 void DrawWorldBox(const WorldBox& box, const WorldMaterials& m) {
     Color tint = box.hitFlash > 0.0f ? RED : WHITE;
-    if (m.loaded && box.surface == Surface::Concrete) {
-        DrawTexturedBox(box.position, box.size, m.concrete, m.concreteTile, tint);
-    } else if (m.loaded && box.surface == Surface::Steel) {
-        DrawTexturedBox(box.position, box.size, m.steel, m.steelTile, tint);
+    if (m.loaded && box.surface != Surface::Plain) {
+        const SurfaceLook& l = m.Of(box.surface);
+        Color c = box.hitFlash > 0.0f ? RED : l.tint;
+        DrawTexturedBox(box.position, box.size, l.albedo, l.tile, c);
     } else {
         DrawCubeV(box.position, box.size, box.hitFlash > 0.0f ? RED : box.color);
         DrawCubeWiresV(box.position, box.size, Fade(BLACK, 0.4f));
@@ -112,7 +140,7 @@ void DrawWorldBox(const WorldBox& box, const WorldMaterials& m) {
 }
 
 Model LoadGroundModel(float width, float length, const WorldMaterials& m) {
-    const float tile = m.concreteTile;
+    const float tile = m.Of(Surface::Concrete).tile;
     const float hw = width / 2, hl = length / 2;
     Mesh mesh = { 0 };
     mesh.vertexCount = 4;
@@ -136,7 +164,7 @@ Model LoadGroundModel(float width, float length, const WorldMaterials& m) {
 
     Model model = LoadModelFromMesh(mesh);
     if (m.loaded) {
-        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = m.concrete; // owned by WorldMaterials
+        model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = m.Of(Surface::Concrete).albedo; // owned by WorldMaterials
     } else {
         model.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = { 80, 95, 80, 255 };
     }

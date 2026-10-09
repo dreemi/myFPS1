@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <cstring>
 #include "raylib.h"
 #include "player.hpp"
 #include "weapon.hpp"
@@ -18,7 +20,11 @@
 static const int SCREEN_W = 1280;
 static const int SCREEN_H = 720;
 
-int main() {
+int main(int argc, char** argv) {
+    // Debug: "--overview N" renders the map from fixed camera N, saves overview_N.png and exits
+    int overview = -1;
+    for (int i = 1; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--overview") == 0) overview = atoi(argv[i + 1]);
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
     InitWindow(SCREEN_W, SCREEN_H, "Dustyard");
     SetTargetFPS(60);
@@ -44,9 +50,7 @@ int main() {
     Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
     SetWeaponModelShader(Render::LitShader());
-    Model unitCube = LoadModelFromMesh(GenMeshCube(1, 1, 1));            // practice targets
     Model spawnPad = LoadModelFromMesh(GenMeshCylinder(1.2f, 0.02f, 32)); // spawn markers
-    Render::ApplyLitShader(unitCube);
     Render::ApplyLitShader(spawnPad);
     float sunOnGun = 1.0f; // eases between 0 (player in shade) and 1
     std::vector<SpawnPoint> spawns = GetSpawnPoints();
@@ -101,6 +105,7 @@ int main() {
             if (nearest > bestDist) { bestDist = nearest; currentSpawn = i; }
         }
         player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
+        gun.Reset(); // a fresh life starts with a full cylinder
     };
 
     while (!WindowShouldClose() && !quit) {
@@ -123,6 +128,7 @@ int main() {
         if (playing && player.IsAlive() && IsKeyPressed(KEY_ENTER)) {
             currentSpawn = (currentSpawn + 1) % (int)spawns.size();
             player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
+            gun.Reset();
         }
 
         // ---------- Update ----------
@@ -291,6 +297,21 @@ int main() {
             }
             cam.target = Vector3Add(cam.position, f);
         }
+        if (overview >= 0) {
+            static const Vector3 VIEWS[][2] = {
+                { { 0.0f, 95.0f, -0.01f }, { 0, 0, 0 } },          // straight down
+                { { -26.0f, 26.0f, -52.0f }, { 0, 0, -12 } },      // over team A's spawn
+                { { 30.0f, 22.0f, 4.0f }, { 0, 0, -8 } },          // the plaza from the east
+                { { 2.0f, 3.5f, -34.0f }, { 2, 2.5f, -12 } },      // mid from spawn A, eye height
+                { { 17.5f, 5.1f, -22.0f }, { 14, 2.5f, -4 } },     // standing on the apartments terrace
+                { { -16.0f, 1.7f, -34.0f }, { -15, 1.6f, -18 } },  // long from spawn
+            };
+            int v = overview % (int)(sizeof(VIEWS) / sizeof(VIEWS[0]));
+            cam.position = VIEWS[v][0];
+            cam.target = VIEWS[v][1];
+            cam.up = { 0, 1, 0 };
+            cam.fovy = v == 0 ? 50.0f : 70.0f;
+        }
 
         // The player's own body (no head or arms: the camera is in the head and the
         // first-person arms are drawn with the gun), so the legs show when looking
@@ -315,10 +336,6 @@ int main() {
                 DrawCharacter(character, anim, CharacterFrame(character, anim, bodyPhase), toWorld, parts, WHITE);
             }
         };
-        auto drawTargets = [&]() {
-            for (const WorldBox& b : world)
-                if (b.isTarget) DrawModelEx(unitCube, b.position, { 0, 1, 0 }, 0, b.size, b.hitFlash > 0.0f ? RED : b.color);
-        };
 
         // Muzzle flashes light up their surroundings
         Vector3 look = player.GetLookDirection();
@@ -330,7 +347,6 @@ int main() {
         // 1. Shadows from the sun
         Render::BeginShadowPass();
             Render::DrawLevel();
-            drawTargets();
             for (const Enemy& e : enemies) e.Draw(&character);
             drawPlayerBody(PART_ALL & ~PART_HEAD);
         Render::EndShadowPass();
@@ -347,7 +363,6 @@ int main() {
                 DrawModel(ground, { 0, 0, 0 }, 1.0f, WHITE);
                 for (const WorldBox& b : world) if (!b.isTarget) DrawWorldBox(b, materials);
             }
-            drawTargets();
             for (const Enemy& e : enemies) e.Draw(&character);
             drawPlayerBody(PART_LEGS);
             for (const SpawnPoint& s : spawns)
@@ -359,7 +374,7 @@ int main() {
 
         // 3. First-person weapon: its own pass on top of the world, lit like the
         //    spot the player stands in (darker in shadow)
-        if (player.IsAlive() && started) {
+        if (player.IsAlive() && started && overview < 0) {
             sunOnGun += ((Render::SunVisible(cam.position, world) ? 1.0f : 0.0f) - sunOnGun) * (1.0f - expf(-8.0f * dt));
             Render::SetViewModelLighting(cam, sunOnGun);
             Render::SetFlashLight(0, { 0.15f, -0.08f, -0.9f }, { 7.0f, 4.5f, 1.8f }, gun.IsMuzzleFlashing() ? 1.5f : 0.0f);
@@ -407,7 +422,7 @@ int main() {
         hs.started = started;
         hs.paused = paused;
         hs.showFps = showFps;
-        Hud::Draw(hs);
+        if (overview < 0) Hud::Draw(hs);
         if (paused) {
             int click = Hud::PauseMenuClick(hs);
             if (click == 1) { paused = false; DisableCursor(); inputGrace = 2; }
@@ -415,12 +430,16 @@ int main() {
         }
 
         EndDrawing();
+        static int frames = 0;
+        if (overview >= 0 && ++frames == 30) {
+            TakeScreenshot(TextFormat("overview_%d.png", overview));
+            quit = true;
+        }
     }
 
     // Models share the lit shader: give them back the default before unloading
-    for (Model* m : { &unitCube, &spawnPad, &character.model }) Render::DetachLitShader(*m);
+    for (Model* m : { &spawnPad, &character.model }) Render::DetachLitShader(*m);
     SetWeaponModelShader(Shader{ rlGetShaderIdDefault(), rlGetShaderLocsDefault() });
-    UnloadModel(unitCube);
     UnloadModel(spawnPad);
     Render::Shutdown();
     Fx::Shutdown();

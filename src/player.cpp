@@ -14,6 +14,7 @@ void Player::Init(Vector3 feetPosition, float facingYaw) {
     airTickTimer = 0.0f;
     health = maxHealth;
     currentEyeHeight = eyeHeight;
+    stepSmooth = 0.0f;
     camera.position = { feet.x, feet.y + eyeHeight, feet.z };
     camera.up = { 0.0f, 1.0f, 0.0f };
     camera.fovy = baseFovy;
@@ -215,11 +216,32 @@ void Player::Simulate(float dt, const PlayerInput& in, const World& world) {
     Vector3 move = Vector3Scale(Vector3Add(oldVel, velocity), 0.5f * dt);
 
     // Resolve each axis separately so you slide along walls; hitting one
-    // kills your speed in that direction
-    Vector3 tryX = { feet.x + move.x, feet.y, feet.z };
-    if (!CollidesAt(tryX, world)) feet = tryX; else velocity.x = 0.0f;
-    Vector3 tryZ = { feet.x, feet.y, feet.z + move.z };
-    if (!CollidesAt(tryZ, world)) feet = tryZ; else velocity.z = 0.0f;
+    // kills your speed in that direction. On the ground, something low enough
+    // (a stair) is stepped up onto instead.
+    auto moveTo = [&](Vector3 to) {
+        if (!CollidesAt(to, world)) { feet = to; return true; }
+        if (!grounded) return false;
+        Vector3 raised = { to.x, feet.y + stepHeight, to.z };
+        if (CollidesAt(raised, world)) return false;
+        float floor = FloorBelow(raised, world);
+        if (floor <= feet.y + 0.01f) return false;
+        stepSmooth -= floor - feet.y;   // the view eases up the step instead of jumping
+        feet = { to.x, floor, to.z };
+        return true;
+    };
+    if (!moveTo({ feet.x + move.x, feet.y, feet.z })) velocity.x = 0.0f;
+    if (!moveTo({ feet.x, feet.y, feet.z + move.z })) velocity.z = 0.0f;
+
+    // Walking down stairs: stay on them rather than falling off each step
+    if (grounded && !in.jump && velocityY <= 0.0f) {
+        float floor = FloorBelow(feet, world);
+        float drop = feet.y - floor;
+        if (drop > 0.001f && drop <= stepHeight) {
+            stepSmooth += drop;
+            feet.y = floor;
+        }
+    }
+    stepSmooth *= expf(-16.0f * dt);
 
     // --- Jumping and gravity ---
     if (grounded && in.jump) {
@@ -272,7 +294,7 @@ void Player::Simulate(float dt, const PlayerInput& in, const World& world) {
     }
     leanAmount = lean;
 
-    camera.position = HeadPosition(leanAmount);
+    camera.position = Vector3Add(HeadPosition(leanAmount), { 0.0f, stepSmooth, 0.0f });
     camera.target = Vector3Add(camera.position, GetLookDirection());
     float roll = leanRollDegrees * leanAmount * DEG2RAD; // tilt toward the lean
     camera.up = Vector3Add(Vector3Scale({ 0.0f, 1.0f, 0.0f }, cosf(roll)), Vector3Scale(GetRight(), sinf(roll)));

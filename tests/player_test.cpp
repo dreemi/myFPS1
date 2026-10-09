@@ -667,25 +667,29 @@ int main() {
         World w = BuildTestWorld();
         std::vector<SpawnPoint> spawns = GetSpawnPoints();
 
-        // Every solid box has a twin mirrored across z = 0
+        // Every box has a twin turned half a circle about the centre: both sides get the same map
         int unmatched = 0;
         for (const WorldBox& a : w) {
             bool found = false;
             for (const WorldBox& b : w) {
-                if (fabsf(a.position.x - b.position.x) < 1e-3f && fabsf(a.position.y - b.position.y) < 1e-3f &&
+                if (fabsf(a.position.x + b.position.x) < 1e-3f && fabsf(a.position.y - b.position.y) < 1e-3f &&
                     fabsf(a.position.z + b.position.z) < 1e-3f && Vector3Equals(a.size, b.size)) found = true;
             }
             if (!found) unmatched++;
         }
-        CHECK(unmatched == 0, "map is mirrored across the middle (%d boxes without a twin)", unmatched);
+        CHECK(unmatched == 0, "map is the same for both sides, turned half a circle (%d boxes without a twin)", unmatched);
+        int targets = 0;
+        for (const WorldBox& b : w) targets += b.isTarget;
+        CHECK(targets == 0, "no floating practice targets (%d)", targets);
 
         Vector3 eyeA = Vector3Add(spawns[0].position, { 0, 1.7f, 0 });
         Vector3 eyeB = Vector3Add(spawns[1].position, { 0, 1.7f, 0 });
         CHECK(!HasLineOfSight(eyeA, eyeB, w), "the two spawns can't see each other");
 
-        // Each lane on its own connects the spawns (walking only, 0.5 m grid)
-        struct Lane { const char* name; float xMin, xMax; };
-        for (Lane lane : { Lane{ "main", -20, -6.5f }, Lane{ "center", -5.5f, 11.5f }, Lane{ "flank", 12.5f, 20 } }) {
+        // Each route on its own connects the spawns at ground level (0.5 m grid). A route
+        // is a band of x on team A's half; the plaza and team B's half are open.
+        struct Route { const char* name; float xMin, xMax; };
+        for (Route route : { Route{ "long", -20, -12 }, Route{ "mid", -6, 6 }, Route{ "apartments", 12, 20 } }) {
             const float cell = 0.5f;
             const int nx = (int)(ARENA_WIDTH / cell), nz = (int)(ARENA_LENGTH / cell);
             auto toWorld = [&](int i, int k) {
@@ -693,8 +697,8 @@ int main() {
             };
             auto open = [&](int i, int k) {
                 Vector3 p = toWorld(i, k);
-                bool inLaneOrSpawn = fabsf(p.z) > 26.0f || (p.x > lane.xMin && p.x < lane.xMax);
-                return inLaneOrSpawn && !CylinderCollides(p, 0.35f, 1.8f, w);
+                bool allowed = p.z < -30.0f || p.z > -9.0f || (p.x > route.xMin && p.x < route.xMax);
+                return allowed && !CylinderCollides(p, 0.35f, 1.8f, w);
             };
             auto cellOf = [&](Vector3 p, int& i, int& k) {
                 i = (int)((p.x + ARENA_WIDTH / 2) / cell);
@@ -717,33 +721,47 @@ int main() {
                     queue.push_back(a * nz + b);
                 }
             }
-            CHECK(seen[gi * nz + gk], "%s lane alone connects spawn A to spawn B", lane.name);
+            CHECK(seen[gi * nz + gk], "%s alone connects spawn A to spawn B", route.name);
         }
 
-        // Low windows can be jumped through; tall dividers can't
-        // Run toward a divider (+X) and jump about 1 m before it
-        auto crossDivider = [&](Vector3 start, float jumpAtX) {
+        // Walk from `start` facing `yaw` for `seconds`; report where it ends and the most time spent airborne in a row
+        struct Walk { Vector3 feet; float longestAir; };
+        auto walk = [&](Vector3 start, float yaw, float seconds, bool jumpAtStart = false) {
             Player p;
-            p.Init(start, PI / 2); // facing +X
+            p.Init(start, yaw);
             Settle(p, w);
             PlayerInput in;
             in.forward = true;
-            bool jumped = false;
-            for (int i = 0; i < 150; i++) {
-                in.jump = !jumped && p.GetFeet().x >= jumpAtX;
-                jumped |= in.jump;
+            float air = 0.0f, longest = 0.0f;
+            for (int i = 0; i < (int)(seconds / DT); i++) {
+                in.jump = jumpAtStart && i == 0;
                 p.Simulate(DT, in, w);
+                air = p.IsGrounded() ? 0.0f : air + DT;
+                longest = fmaxf(longest, air);
             }
-            return p.GetFeet().x;
+            return Walk{ p.GetFeet(), longest };
         };
-        float x = crossDivider({ -10, 0, 0 }, -7.9f);
-        CHECK(x > -5.0f, "running jump through the main/center window (x -10 -> %.1f)", x);
-        x = crossDivider({ -10, 0, 0 }, 1e9f);
-        CHECK(x < -6.0f, "can't walk through the window without jumping (x -10 -> %.1f)", x);
-        x = crossDivider({ -10, 0, 9 }, -7.9f);
-        CHECK(x < -6.0f, "can't jump the tall divider (x -10 -> %.1f)", x);
-        x = crossDivider({ 7, 0, 19 }, 10.1f);
-        CHECK(x > 13.0f, "running jump through the center/flank window (x 7 -> %.1f)", x);
+
+        Walk up = walk({ 18, 0, -31 }, 0.0f, 3.0f);
+        CHECK(fabsf(up.feet.y - 3.4f) < 0.01f && up.feet.z > -24.0f,
+              "walking up the apartments stairs reaches the terrace (y %.2f, z %.1f)", up.feet.y, up.feet.z);
+        Walk cat = walk({ 4.4f, 0, -30.5f }, 0.0f, 2.0f);
+        CHECK(fabsf(cat.feet.y - 1.9f) < 0.01f && cat.feet.z > -26.0f,
+              "walking up the catwalk stairs reaches the catwalk (y %.2f, z %.1f)", cat.feet.y, cat.feet.z);
+        Walk down = walk({ 18, 3.4f, -23 }, PI, 3.0f);
+        CHECK(down.feet.y == 0.0f && down.longestAir < 0.1f,
+              "walking down the stairs stays on them (longest time in the air %.2f s)", down.longestAir);
+
+        Walk doors = walk({ -3, 0, -18 }, 0.0f, 1.5f);
+        CHECK(doors.feet.z > -13.0f, "mid doors can be walked through (z -18 -> %.1f)", doors.feet.z);
+        Walk railing = walk({ 16, 3.4f, -12 }, 0.0f, 1.5f);
+        CHECK(railing.feet.y == 3.4f && railing.feet.z < -8.2f, "the balcony railing holds (z %.2f, y %.2f)",
+              railing.feet.z, railing.feet.y);
+        Walk drop = walk({ 12.8f, 3.4f, -12 }, 0.0f, 2.0f);
+        CHECK(drop.feet.y < 0.05f && drop.feet.z > -7.0f, "the railing's gap drops into the plaza (z %.1f, y %.2f)",
+              drop.feet.z, drop.feet.y);
+        Walk over = walk({ 18.5f, 3.4f, -20 }, PI / 2, 1.5f, true);
+        CHECK(over.feet.x < 19.5f, "the town wall can't be jumped, even from the terrace (x %.2f)", over.feet.x);
     }
 
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");

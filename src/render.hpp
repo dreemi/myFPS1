@@ -39,7 +39,8 @@ void EndWorldPass();
 void SetViewModelLighting(const Camera3D& worldCamera, float sunVisibility);
 
 // Surface kinds (switching flushes pending batched geometry)
-void SurfaceWorldMapped(float tileSize, float specular); // level boxes/ground: world-space UVs + normal maps
+// Level boxes/ground: world-space UVs + normal maps (faceMapped: the texture covers each face once)
+void SurfaceWorldMapped(float tileSize, float specular, bool faceMapped = false);
 void SurfaceObject(float specular);                       // models with their own UVs (characters)
 // Physically based metal/dielectric with sky reflections (weapons, casings). Roughness multiplies
 // the roughness map (texture1.r) when roughMap; normalMap uses texture2. Occlusion scales sky light.

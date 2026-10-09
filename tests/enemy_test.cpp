@@ -605,6 +605,13 @@ int main() {
               "reloading: returns on target with a full cylinder");
         ViewModelEvents ev = fireVm.TakeEvents();
         (void)ev;
+
+        // Dying mid-reload with an empty gun: the next life starts full
+        Weapon dead(REVOLVER);
+        for (int i = 0; i < REVOLVER.magazineSize; i++) dead.Fire(CameraAt({ 0, 1.7f, 0 }, { 0, 1.7f, 1 }), nothing, noEnemies);
+        dead.StartReload();
+        dead.Reset();
+        CHECK(dead.GetAmmo() == REVOLVER.magazineSize && !dead.IsReloading(), "respawning refills the cylinder (%d)", dead.GetAmmo());
     }
 
     std::printf("Bullet spread\n");

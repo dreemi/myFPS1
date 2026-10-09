@@ -53,6 +53,7 @@ public:
     // Advances timers, recoil and spread without reading input
     void Tick(float dt, Stance stance);
     bool StartReload(); // false if already reloading or the magazine is full
+    void Reset();       // a fresh weapon: full, not reloading, at the hip (on respawn)
     // Fires one shot from the camera within the current spread (no input/cooldown checks)
     ShotResult Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies);
     const ShotResult& LastShot() const { return lastShot; } // the shot Update fired this frame

@@ -176,9 +176,10 @@ void Impact(Vector3 point, Vector3 normal, Surface surface) {
     if (!ready) return;
     Vector3 at = Vector3Add(point, Vector3Scale(normal, 0.02f));
     bool steel = surface == Surface::Steel;
+    bool wood = surface == Surface::Wood || surface == Surface::Crate || surface == Surface::Painted;
 
-    // Sparks: lots off steel, a few off stone
-    int sparks = steel ? 14 : 4;
+    // Sparks: lots off steel, a few off stone, none off wood
+    int sparks = steel ? 14 : (wood ? 0 : 4);
     for (int i = 0; i < sparks; i++) {
         Vector3 d = RandAround(normal, 0.9f);
         float s = Rand(4.0f, steel ? 11.0f : 7.0f);
@@ -189,8 +190,12 @@ void Impact(Vector3 point, Vector3 normal, Surface surface) {
     Emit({ at, { 0, 0, 0 }, 0, 0.06f, steel ? 0.35f : 0.22f, 1.0f, Rand(0, 360), 0, 0, 0,
            { 255, 210, 150, 255 }, Tex::Flash, Blend::Additive, false });
 
-    // Dust: puffs that drift and grow (grey-brown off stone, rusty off steel)
-    Color dust = steel ? Color{ 120, 95, 80, 255 } : Color{ 150, 135, 115, 255 };
+    // Dust: puffs that drift and grow, the colour of what was hit
+    Color dust = { 150, 135, 115, 255 };
+    if (steel) dust = { 120, 95, 80, 255 };
+    else if (wood) dust = { 140, 112, 80, 255 };
+    else if (surface == Surface::Plaster) dust = { 205, 195, 175, 255 };
+    else if (surface == Surface::Sandstone || surface == Surface::Sand) dust = { 196, 168, 124, 255 };
     int puffs = steel ? 4 : 8;
     for (int i = 0; i < puffs; i++) {
         Vector3 d = RandAround(normal, 0.6f);
@@ -198,11 +203,12 @@ void Impact(Vector3 point, Vector3 normal, Surface surface) {
                Rand(0, 360), Rand(-90, 90), -0.3f, 2.5f, dust, Tex::Soft, Blend::Alpha, false });
     }
     // Chips: small dark bits thrown out and falling
-    int chips = steel ? 2 : 6;
+    int chips = steel ? 2 : (wood ? 9 : 6); // wood throws splinters
+    Color chip = steel ? Color{ 60, 50, 45, 255 } : (wood ? Color{ 150, 118, 78, 255 } : Color{ 90, 82, 72, 255 });
     for (int i = 0; i < chips; i++) {
         Vector3 d = RandAround(normal, 0.8f);
-        Emit({ at, Vector3Scale(d, Rand(2.0f, 5.0f)), 0, Rand(0.4f, 0.8f), Rand(0.012f, 0.025f), 0, 0, 0, 9.8f, 0.5f,
-               steel ? Color{ 60, 50, 45, 255 } : Color{ 90, 82, 72, 255 }, Tex::Soft, Blend::Alpha, false });
+        Emit({ at, Vector3Scale(d, Rand(2.0f, 5.0f)), 0, Rand(0.4f, 0.8f), Rand(0.012f, wood ? 0.03f : 0.025f), 0, 0, 0,
+               9.8f, 0.5f, chip, Tex::Soft, Blend::Alpha, false });
     }
 
     // Bullet hole

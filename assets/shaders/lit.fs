@@ -17,6 +17,7 @@ uniform sampler2D shadowMap;
 uniform vec4 colDiffuse;
 
 uniform int worldMapped;
+uniform int faceMapped;       // world-mapped surface whose texture covers each face once (vertex UVs)
 uniform float tileSize;
 uniform float specular;       // highlight strength for this surface
 
@@ -123,7 +124,7 @@ void main()
         if (a.y >= a.x && a.y >= a.z) { r = vec3(1, 0, 0); u = n.y > 0.0 ? vec3(0, 0, -1) : vec3(0, 0, 1); }
         else if (a.x >= a.z)          { r = n.x > 0.0 ? vec3(0, 0, -1) : vec3(0, 0, 1); u = vec3(0, 1, 0); }
         else                          { r = n.z > 0.0 ? vec3(1, 0, 0) : vec3(-1, 0, 0); u = vec3(0, 1, 0); }
-        uv = vec2(dot(fragPosition, r), -dot(fragPosition, u)) / tileSize;
+        uv = faceMapped == 1 ? fragTexCoord : vec2(dot(fragPosition, r), -dot(fragPosition, u)) / tileSize;
         vec3 nm = texture(texture2, uv).xyz * 2.0 - 1.0;
         N = normalize(r * nm.x + u * nm.y + n * nm.z);
         rough = texture(texture1, uv).r;

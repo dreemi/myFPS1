@@ -6,7 +6,7 @@
 
 // Short effects, synthesized at startup (no files)
 enum class Sfx {
-    ImpactConcrete, ImpactSteel, FleshHit, HitTick, Headshot, KillConfirm,
+    ImpactConcrete, ImpactSteel, ImpactWood, FleshHit, HitTick, Headshot, KillConfirm,
     BulletCrack, Hurt, DryFire, Land, CasingTink, Count
 };
 

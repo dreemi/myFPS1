@@ -73,6 +73,15 @@ void Weapon::Tick(float dt, Stance stance) {
     }
 }
 
+void Weapon::Reset() {
+    ammo = def->magazineSize;
+    reloadTimer = cooldownTimer = 0.0f;
+    recoil = muzzleFlash = hitMarker = 0.0f;
+    aimAmount = 0.0f;
+    spread = def->spreadStill;
+    dryFire = false;
+}
+
 bool Weapon::StartReload() {
     if (IsReloading() || ammo >= def->magazineSize) return false;
     reloadTimer = def->reloadTime;

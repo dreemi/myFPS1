@@ -73,9 +73,11 @@ private:
     int maxHealth = 100;
     int health = 100;
     float currentEyeHeight = 1.7f; // eases between standing and crouched
+    float stepSmooth = 0.0f;       // camera lag (m) after stepping up or down a stair, eases to 0
 
 public:
     // Movement tuning (public so tests can derive expected numbers)
+    float stepHeight = 0.45f;      // walking climbs (and descends) ledges up to this high: stairs
     float walkSpeed = 5.0f;
     float sprintSpeed = 8.5f;
     float strafeScale = 0.9f;      // sideways top speed vs forward
