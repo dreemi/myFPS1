@@ -23,12 +23,16 @@ struct WeaponDef {
     // Spread cone half-angle (degrees) by stance, before aiming
     float spreadAirborne, spreadSprinting, spreadWalking, spreadStill, spreadCrouchMoving, spreadCrouchStill;
     float aimSpreadScale; // aiming down sights multiplies spread by this
+    bool automatic = false;       // keeps firing while the trigger is held
+    float reloadEmptyTime = 0.0f; // reload from empty (has to be charged), if longer than reloadTime
+    float bloomPerShot = 0.0f;    // degrees each shot adds to the spread (sustained fire walks off)
 
     float HipSpread(Stance stance) const;
 };
 
-// Enemies have 100 health: 4 body shots or 2 headshots to kill
-extern const WeaponDef REVOLVER;
+// Enemies have 100 health.
+extern const WeaponDef REVOLVER; // 4 body shots or 2 headshots
+extern const WeaponDef FAL;      // 3 body shots or 1 headshot, automatic
 
 // What one shot hit (for effects and sounds; damage is already applied)
 struct ShotResult {
@@ -53,6 +57,7 @@ public:
     // Advances timers, recoil and spread without reading input
     void Tick(float dt, Stance stance);
     bool StartReload(); // false if already reloading or the magazine is full
+    void CancelReload(); // put away mid-reload: nothing changes
     void Reset();       // a fresh weapon: full, not reloading, at the hip (on respawn)
     // Fires one shot from the camera within the current spread (no input/cooldown checks)
     ShotResult Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies);
@@ -72,7 +77,9 @@ public:
     const WeaponDef& GetDef() const { return *def; }
     int GetAmmo() const { return ammo; }
     bool IsReloading() const { return reloadTimer > 0.0f; }
-    float GetReloadProgress() const { return IsReloading() ? 1.0f - reloadTimer / def->reloadTime : 0.0f; } // 0..1
+    float GetReloadProgress() const { return IsReloading() ? 1.0f - reloadTimer / reloadDuration : 0.0f; } // 0..1
+    float GetReloadDuration() const { return reloadDuration; }   // of the current (or last) reload
+    bool IsEmptyReload() const { return emptyReload; }           // the current reload started from empty
     float GetRecoil() const { return recoil; }            // 1 right after a shot, decays to 0
     bool IsMuzzleFlashing() const { return muzzleFlash > 0.0f; }
     int GetKills() const { return kills; }
@@ -86,6 +93,8 @@ private:
     int ammo;
     float cooldownTimer = 0.0f;
     float reloadTimer = 0.0f;
+    float reloadDuration = 1.0f;
+    bool emptyReload = false;
     float recoil = 0.0f;         // 0..1, decays over time
     float aimAmount = 0.0f;      // 0..1, eased
     float aimEaseRate = 15.0f;

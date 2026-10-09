@@ -2,6 +2,7 @@
 #include "../src/enemy.hpp"
 #include "../src/weapon.hpp"
 #include "../src/viewmodel.hpp"
+#include "../src/rifle_view.hpp"
 #include "raymath.h"
 #include <cmath>
 #include <cstdio>
@@ -28,6 +29,14 @@ static bool InsideArena(Vector3 p) {
 static World OuterWalls() {
     World full = BuildTestWorld();
     return World(full.begin(), full.begin() + 4);
+}
+
+static bool NearIdentity(Matrix m) {
+    const float* a = &m.m0;
+    Matrix id = MatrixIdentity();
+    const float* b = &id.m0;
+    for (int i = 0; i < 16; i++) if (fabsf(a[i] - b[i]) > 1e-4f) return false;
+    return true;
 }
 
 static Camera3D CameraAt(Vector3 eye, Vector3 lookAt) {
@@ -612,6 +621,100 @@ int main() {
         dead.StartReload();
         dead.Reset();
         CHECK(dead.GetAmmo() == REVOLVER.magazineSize && !dead.IsReloading(), "respawning refills the cylinder (%d)", dead.GetAmmo());
+    }
+
+    std::printf("FAL rifle\n");
+    {
+        World nothing;
+        std::vector<Enemy> noEnemies;
+        Camera3D cam = CameraAt({ 0, 1.7f, 0 }, { 0, 1.7f, 1 });
+
+        // Damage: 3 to the body, 1 to the head
+        CHECK(FAL.bodyDamage * 2 < 100 && FAL.bodyDamage * 3 >= 100 && FAL.headDamage >= 100,
+              "three body shots or one headshot kill (%d / %d damage)", FAL.bodyDamage, FAL.headDamage);
+        CHECK(FAL.automatic && !REVOLVER.automatic && FAL.magazineSize == 20, "automatic, 20-round magazine");
+
+        // Rate of fire: ~650 rounds a minute while the cooldown allows
+        Weapon fal(FAL, 3);
+        int shots = 0;
+        float cooldown = 0.0f;
+        for (int i = 0; i < 60; i++) { // one second, firing whenever it's ready
+            fal.Tick(DT, Stance::Still);
+            cooldown -= DT;
+            if (cooldown <= 0.0f) { fal.Fire(cam, nothing, noEnemies); shots++; cooldown = FAL.fireCooldown; }
+        }
+        CHECK(shots >= 10 && shots <= 12, "fires %d rounds in a second (~650 rpm)", shots);
+
+        // Each shot opens the spread a little; it closes again when you stop
+        Weapon bloom(FAL, 4);
+        for (int i = 0; i < 120; i++) bloom.UpdateSpread(DT, Stance::Still);
+        float settled = bloom.GetSpread();
+        for (int i = 0; i < 5; i++) bloom.Fire(cam, nothing, noEnemies);
+        float opened = bloom.GetSpread();
+        for (int i = 0; i < 120; i++) bloom.UpdateSpread(DT, Stance::Still);
+        CHECK(opened > settled + 2.0f && fabsf(bloom.GetSpread() - settled) < 0.05f,
+              "sustained fire opens the spread (%.1f -> %.1f deg) and it recovers", settled, opened);
+
+        // Reloads: quicker with a round still chambered than from empty (the bolt has to be charged)
+        Weapon tac(FAL, 5);
+        tac.Fire(cam, nothing, noEnemies);
+        tac.StartReload();
+        float tacTime = tac.GetReloadDuration();
+        Weapon dry(FAL, 6);
+        for (int i = 0; i < FAL.magazineSize; i++) dry.Fire(cam, nothing, noEnemies);
+        dry.StartReload();
+        CHECK(!tac.IsEmptyReload() && dry.IsEmptyReload() && dry.GetReloadDuration() > tacTime + 0.5f,
+              "reload %.1f s with a round chambered, %.1f s from empty", tacTime, dry.GetReloadDuration());
+        dry.CancelReload();
+        CHECK(!dry.IsReloading() && dry.GetAmmo() == 0, "switching away cancels a reload without refilling");
+
+        // The view: bolt cycles and throws a case per shot, locks back on empty, and the
+        // reload swaps the magazine and charges the bolt
+        Weapon gun(FAL, 7);
+        RifleView view(FAL_MODELS);
+        ViewModelMotion still;
+        for (int i = 0; i < 30; i++) { gun.Tick(DT, Stance::Still); view.Update(DT, still, gun); }
+        gun.Fire(cam, nothing, noEnemies);
+        float boltPeak = 0.0f;
+        for (int i = 0; i < 4; i++) { view.Update(DT, still, gun); boltPeak = fmaxf(boltPeak, view.Mechanism().bolt); gun.Tick(DT, Stance::Still); }
+        for (int i = 0; i < 40; i++) { gun.Tick(DT, Stance::Still); view.Update(DT, still, gun, &cam); }
+        ViewModelEvents ev = view.TakeEvents();
+        int cases = 0;
+        for (const auto& d : ev.debris) cases += d.kind == DEBRIS_RIFLE_CASE;
+        CHECK(boltPeak > 0.7f && view.Mechanism().bolt < 0.01f && cases == 1,
+              "a shot cycles the bolt (back %.0f%%, closed again) and throws one case (%d)", boltPeak * 100, cases);
+
+        while (gun.GetAmmo() > 0) { gun.Fire(cam, nothing, noEnemies); view.Update(DT, still, gun); for (int i = 0; i < 6; i++) { gun.Tick(DT, Stance::Still); view.Update(DT, still, gun); } }
+        for (int i = 0; i < 20; i++) { gun.Tick(DT, Stance::Still); view.Update(DT, still, gun); }
+        CHECK(view.Mechanism().bolt > 0.99f, "the bolt locks back on an empty magazine");
+
+        CHECK(gun.StartReload() && gun.IsEmptyReload(), "reload from empty starts");
+        auto runTo = [&](float seconds) {
+            while (gun.IsReloading() && gun.GetReloadProgress() * gun.GetReloadDuration() < seconds) {
+                gun.Tick(DT, Stance::Still);
+                view.Update(DT, still, gun, &cam);
+            }
+        };
+        runTo(0.45f);
+        CHECK(view.Mechanism().magInGun && !NearIdentity(view.Mechanism().magTransform),
+              "the old magazine rocks out of the well");
+        runTo(0.9f);
+        ViewModelEvents out = view.TakeEvents();
+        int mags = 0;
+        for (const auto& d : out.debris) mags += d.kind == DEBRIS_RIFLE_MAG;
+        CHECK(!view.Mechanism().magInGun && (mags == 1 || out.debris.empty()) && out.Has(ViewSound::MagOut),
+              "...and is dropped (magazine gone from the gun)");
+        runTo(1.9f);
+        CHECK(view.Mechanism().magInGun && NearIdentity(view.Mechanism().magTransform) &&
+              view.Mechanism().bolt > 0.99f, "a fresh magazine is seated; the bolt is still back");
+        runTo(2.8f);
+        float charger = view.Mechanism().charger;
+        runTo(3.0f);
+        ViewModelEvents charged = view.TakeEvents();
+        CHECK(charger > 0.5f && view.Mechanism().bolt < 0.01f && charged.Has(ViewSound::ChargeRelease),
+              "the charging handle is pulled (%.0f%%) and let go: the bolt slams home", charger * 100);
+        while (gun.IsReloading()) { gun.Tick(DT, Stance::Still); view.Update(DT, still, gun); }
+        CHECK(gun.GetAmmo() == FAL.magazineSize, "a full magazine after the reload");
     }
 
     std::printf("Bullet spread\n");

@@ -13,6 +13,18 @@ const WeaponDef REVOLVER = {
     0.3f,            // aiming down sights spread multiplier
 };
 
+const WeaponDef FAL = {
+    "FAL",
+    34, 100,         // 7.62 NATO: three to the body, one to the head
+    0.092f,          // ~650 rounds a minute
+    20, 2.6f,        // 20-round magazine
+    10.0f, 7.0f, 3.5f, 1.4f, 1.2f, 0.8f,
+    0.25f,
+    true,            // automatic
+    3.4f,            // from empty: the bolt has to be charged after the magazine goes in
+    0.55f,           // each shot opens the spread a little
+};
+
 float WeaponDef::HipSpread(Stance stance) const {
     switch (stance) {
         case Stance::Airborne:     return spreadAirborne;
@@ -76,6 +88,7 @@ void Weapon::Tick(float dt, Stance stance) {
 void Weapon::Reset() {
     ammo = def->magazineSize;
     reloadTimer = cooldownTimer = 0.0f;
+    emptyReload = false;
     recoil = muzzleFlash = hitMarker = 0.0f;
     aimAmount = 0.0f;
     spread = def->spreadStill;
@@ -84,8 +97,14 @@ void Weapon::Reset() {
 
 bool Weapon::StartReload() {
     if (IsReloading() || ammo >= def->magazineSize) return false;
-    reloadTimer = def->reloadTime;
+    emptyReload = ammo == 0;
+    reloadDuration = emptyReload && def->reloadEmptyTime > def->reloadTime ? def->reloadEmptyTime : def->reloadTime;
+    reloadTimer = reloadDuration;
     return true;
+}
+
+void Weapon::CancelReload() {
+    reloadTimer = 0.0f;
 }
 
 bool Weapon::Update(float dt, const Camera3D& camera, World& world, std::vector<Enemy>& enemies, Stance stance) {
@@ -94,13 +113,17 @@ bool Weapon::Update(float dt, const Camera3D& camera, World& world, std::vector<
     if (IsReloading()) return false;
     if (IsKeyPressed(KEY_R) && StartReload()) return false;
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && cooldownTimer <= 0.0f) {
+    bool pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    bool trigger = pressed || (def->automatic && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+    if (trigger && cooldownTimer <= 0.0f) {
         if (ammo > 0) {
             lastShot = Fire(camera, world, enemies);
             return true;
         }
-        dryFire = true;
-        StartReload(); // auto-reload on empty click
+        if (pressed) {
+            dryFire = true;
+            StartReload(); // auto-reload on empty click
+        }
     }
     return false;
 }
@@ -112,6 +135,7 @@ ShotResult Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>
     recoil = 1.0f;
 
     Ray ray = ShotRay(camera);
+    spread += def->bloomPerShot; // recovers toward the stance's spread over time
     ShotResult result;
     result.direction = ray.direction;
 

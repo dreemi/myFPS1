@@ -3,7 +3,8 @@
 #include <cstdio>
 #include <cstring>
 
-static const char* ANIM_NAMES[(int)CharAnim::Count] = { "idle", "walk", "run", "crouch", "crouch_walk", "fp_hold", "rest" };
+static const char* ANIM_NAMES[(int)CharAnim::Count] = { "idle", "walk", "run", "crouch", "crouch_walk", "fp_hold", "rest",
+                                                         "fp_rifle" };
 
 bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
     std::string dir = assetDir + "models/character/";
@@ -13,6 +14,7 @@ bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
         return false;
     }
     c.anims = LoadModelAnimations((dir + "character.glb").c_str(), &c.animCount);
+    for (int k = 0; k < (int)CharAnim::Count; k++) c.animIndex[k] = -1;
     for (int a = 0; a < c.animCount; a++)
         for (int k = 0; k < (int)CharAnim::Count; k++)
             if (strcmp(c.anims[a].name, ANIM_NAMES[k]) == 0) c.animIndex[k] = a;
@@ -36,9 +38,17 @@ bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
                 c.aimGrip = v;
             } else if (sscanf(line, "fp_grip %f %f %f", &v.x, &v.y, &v.z) == 3) {
                 c.fpGrip = v;
-            } else if (sscanf(line, "fp_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4 && index >= 0 && index < 1000) {
-                if ((int)c.fpLeftPalm.size() <= index) c.fpLeftPalm.resize(index + 1, v);
-                c.fpLeftPalm[index] = v;
+            } else if (sscanf(line, "fp_rifle_grip %f %f %f", &v.x, &v.y, &v.z) == 3) {
+                c.fpRifleGrip = v;
+            } else {
+                bool rifle = sscanf(line, "fp_rifle_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4;
+                if (rifle || sscanf(line, "fp_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4) {
+                    std::vector<Vector3>& track = c.leftPalm[(int)(rifle ? CharAnim::FpRifle : CharAnim::FpHold)];
+                    if (index >= 0 && index < 1000) {
+                        if ((int)track.size() <= index) track.resize(index + 1, v);
+                        track[index] = v;
+                    }
+                }
             }
         }
         UnloadFileText(text);
@@ -100,22 +110,24 @@ Matrix CharacterHandTransform(const CharacterAssets& c, CharAnim anim, int frame
                           MatrixTranslate(t.translation.x, t.translation.y, t.translation.z));
 }
 
-Vector3 CharacterFpLeftPalm(const CharacterAssets& c, float blenderFrame) {
-    if (c.fpLeftPalm.empty()) return { 0, 0, 0 };
-    float f = Clamp(blenderFrame, 0.0f, (float)(c.fpLeftPalm.size() - 1));
+Vector3 CharacterFpLeftPalm(const CharacterAssets& c, CharAnim anim, float blenderFrame) {
+    const std::vector<Vector3>& track = c.leftPalm[(int)anim];
+    if (track.empty()) return { 0, 0, 0 };
+    float f = Clamp(blenderFrame, 0.0f, (float)(track.size() - 1));
     int i = (int)f;
-    int j = i + 1 < (int)c.fpLeftPalm.size() ? i + 1 : i;
-    return Vector3Lerp(c.fpLeftPalm[i], c.fpLeftPalm[j], f - (float)i);
+    int j = i + 1 < (int)track.size() ? i + 1 : i;
+    return Vector3Lerp(track[i], track[j], f - (float)i);
 }
 
 Vector3 CharacterGripPoint(const CharacterAssets& c, CharAnim anim, int frame) {
     if (!c.loaded) return c.aimGrip;
     // The exported grip point is for the first frame of the hold poses; other
     // frames move the hand (walk bob, reload) - follow the hand bone.
-    bool fp = anim == CharAnim::FpHold;
-    const ModelAnimation& ref = c.anims[c.animIndex[(int)(fp ? CharAnim::FpHold : CharAnim::Idle)]];
+    bool fp = anim == CharAnim::FpHold || anim == CharAnim::FpRifle;
+    const ModelAnimation& ref = c.anims[c.animIndex[(int)(fp ? anim : CharAnim::Idle)]];
     const ModelAnimation& cur = c.anims[c.animIndex[(int)anim]];
     frame = Clamp(frame, 0, cur.frameCount - 1);
     Vector3 delta = Vector3Subtract(cur.framePoses[frame][c.handBone].translation, ref.framePoses[0][c.handBone].translation);
-    return Vector3Add(fp ? c.fpGrip : c.aimGrip, delta);
+    Vector3 base = anim == CharAnim::FpHold ? c.fpGrip : (anim == CharAnim::FpRifle ? c.fpRifleGrip : c.aimGrip);
+    return Vector3Add(base, delta);
 }

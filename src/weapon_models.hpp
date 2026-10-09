@@ -59,6 +59,38 @@ int RevolverChamberAtBarrel(float cylinder);
 // Loose cartridges (the viewmodel's falling cases, world brass): origin at the rim face, bullet along -Z
 void DrawCartridge(Matrix transform, bool fired);
 
+// The FN FAL (assets/models/fal, made by tools/make_fal.py)
+struct FalPose {
+    float bolt = 0.0f;       // 0 = closed, 1 = fully back
+    float charger = 0.0f;    // charging handle: 0 = forward, 1 = pulled all the way back
+    float trigger = 0.0f;    // 0 = forward, 1 = pulled
+    bool magInGun = true;    // drawn at magTransform (gun space; identity = seated)
+    Matrix magTransform = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    bool magLoaded = true;   // a round showing at the top of the magazine
+};
+struct FalRig {
+    Vector3 muzzle = { 0.0f, 0.045f, -0.775f };
+    Vector3 frontSight = { 0.0f, 0.098f, -0.562f };
+    Vector3 rearSight = { 0.0f, 0.098f, 0.056f };
+    Vector3 ejectionPort = { 0.017f, 0.049f, -0.067f }; // where cases come out (right side)
+    Vector3 chamber = { 0.0f, 0.045f, -0.105f };
+    Vector3 magPivot = { 0.0f, -0.010f, -0.111f };      // the magazine hooks in here and rocks back to latch
+    Vector3 magTop = { 0.0f, -0.012f, -0.076f };
+    Vector3 triggerPivot = { 0.0f, -0.006f, -0.012f };
+    Vector3 chargerKnob = { -0.040f, 0.054f, -0.170f };
+    Vector3 handGrip = { 0.0f, -0.050f, 0.031f };
+    Vector3 handguard = { 0.0f, 0.011f, -0.250f };      // where the support hand holds it
+    float boltTravel = 0.09f, chargerTravel = 0.10f, caseLength = 0.051f;
+};
+const FalRig& GetFalRig();
+void DrawFal(const FalPose& pose);
+Matrix FalMagazineRock(float degrees, float drop); // magazine rocked about its front hook (+ forward), dropped down
+void DrawRifleCartridge(Matrix transform, bool fired);
+
+// Anything that falls out of a gun and lands in the world
+enum DebrisKind { DEBRIS_REVOLVER_ROUND, DEBRIS_REVOLVER_CASE, DEBRIS_RIFLE_ROUND, DEBRIS_RIFLE_CASE, DEBRIS_RIFLE_MAG };
+void DrawDebris(Matrix transform, int kind); // cartridges: origin at the rim face, bullet along -Z; magazines: origin at the centre
+
 // What the first-person model needs besides the gun's own parts
 struct ViewModelPose {
     RevolverPose revolver;
@@ -92,6 +124,8 @@ struct WeaponModels {
 
 // The revolver. Sight and muzzle points are refreshed from revolver.txt when the assets load.
 extern WeaponModels REVOLVER_MODELS;
+// The FAL's first-person placement (drawn by RifleView). Points refresh from fal.txt.
+extern WeaponModels FAL_MODELS;
 
 // Load/unload the weapon meshes and textures (after InitWindow). Without them
 // the weapons draw as a plain placeholder box.

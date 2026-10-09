@@ -139,6 +139,66 @@ Sound MakeSfx(Sfx kind) {
         x.Tone(base * 0.52f, 0.15f, 30.0f, 0.0f, 0.9f);
         return x.Make(0.45f);
     }
+    case Sfx::RifleBoom: {      // the body of a full-power rifle round: a deep thump and a sharp crack
+        Synth x(0.7f);
+        x.NoiseBurst(1.0f, 20.0f, 0.30f);
+        x.Tone(68.0f, 0.9f, 8.0f, 0.0f, 0.6f);
+        x.NoiseBurst(0.6f, 70.0f, 0.95f, 0.9f);
+        x.NoiseBurst(0.25f, 5.0f, 0.12f, 0.0f, 0.05f); // the rumble rolling off the walls
+        return x.Make(0.95f);
+    }
+    case Sfx::MagOut: {         // the release clicks, the magazine scrapes out of the well
+        Synth x(0.25f);
+        x.NoiseBurst(0.6f, 130.0f, 0.9f, 0.85f);
+        x.Tone(2300.0f, 0.4f, 90.0f);
+        x.NoiseBurst(0.35f, 16.0f, 0.5f, 0.6f, 0.04f);
+        return x.Make(0.6f);
+    }
+    case Sfx::MagIn: {          // steel on steel, locking home
+        Synth x(0.2f);
+        x.Tone(320.0f, 0.5f, 40.0f);
+        x.Tone(1600.0f, 0.7f, 60.0f);
+        x.Tone(2850.0f, 0.4f, 80.0f);
+        x.NoiseBurst(0.8f, 90.0f, 0.85f, 0.8f);
+        return x.Make(0.7f);
+    }
+    case Sfx::MagSlap: {        // a palm smacking the floorplate
+        Synth x(0.15f);
+        x.NoiseBurst(0.9f, 45.0f, 0.2f);
+        x.Tone(180.0f, 0.6f, 35.0f);
+        return x.Make(0.55f);
+    }
+    case Sfx::ChargeBack: {     // the charging handle dragged back: a gritty slide and a stop
+        Synth x(0.3f);
+        x.NoiseBurst(0.5f, 7.0f, 0.6f, 0.7f);
+        x.Tone(900.0f, 0.3f, 30.0f);
+        x.NoiseBurst(0.6f, 100.0f, 0.9f, 0.8f, 0.2f);
+        x.Tone(1800.0f, 0.3f, 80.0f, 0.2f);
+        return x.Make(0.55f);
+    }
+    case Sfx::ChargeRelease: {  // the bolt slamming forward and locking on a round
+        Synth x(0.25f);
+        x.Tone(140.0f, 0.6f, 30.0f);
+        x.Tone(700.0f, 0.8f, 50.0f);
+        x.Tone(1900.0f, 0.5f, 70.0f);
+        x.NoiseBurst(1.0f, 70.0f, 0.8f, 0.7f);
+        return x.Make(0.8f);
+    }
+    case Sfx::MagDrop: {        // an empty magazine clattering onto stone
+        Synth x(0.35f);
+        x.Tone(420.0f, 0.7f, 35.0f);
+        x.Tone(1250.0f, 0.35f, 45.0f);
+        x.Tone(2600.0f, 0.2f, 60.0f, 0.05f);
+        x.NoiseBurst(0.6f, 50.0f, 0.4f);
+        return x.Make(0.6f);
+    }
+    case Sfx::WeaponDraw: {     // sling and metal shifting as a gun comes up
+        Synth x(0.3f);
+        x.NoiseBurst(0.4f, 14.0f, 0.3f, 0.4f);
+        x.Tone(2500.0f, 0.15f, 40.0f, 0.08f);
+        x.NoiseBurst(0.3f, 60.0f, 0.8f, 0.8f, 0.12f);
+        return x.Make(0.4f);
+    }
     case Sfx::Land: {           // boots hitting the ground
         Synth x(0.2f);
         x.NoiseBurst(1.0f, 30.0f, 0.09f);
@@ -328,6 +388,17 @@ void GameAudio::PlayGunshot(float volume, float pan) {
     SetSoundPan(v, 0.5f - 0.5f * Clamp(pan, -1.0f, 1.0f)); // raylib: 1 = left, 0 = right
     SetSoundPitch(v, GetRandomValue(95, 105) / 100.0f);   // small variation so shots don't sound identical
     PlaySound(v);
+}
+
+void GameAudio::PlayRifleShot(float volume, float pan) {
+    if (!loaded) return;
+    Sound& v = gunshotVoices[nextVoice];
+    nextVoice = (nextVoice + 1) % GUNSHOT_VOICES;
+    SetSoundVolume(v, Clamp(volume, 0.0f, 1.0f));
+    SetSoundPan(v, 0.5f - 0.5f * Clamp(pan, -1.0f, 1.0f));
+    SetSoundPitch(v, GetRandomValue(72, 78) / 100.0f); // a bigger cartridge: deeper and longer
+    PlaySound(v);
+    Play(Sfx::RifleBoom, volume * 0.8f, pan);
 }
 
 void GameAudio::PlayGunshotAt(Vector3 source, Vector3 ear, Vector3 right) {

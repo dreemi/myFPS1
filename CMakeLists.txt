@@ -24,6 +24,7 @@ add_executable(fps
     src/world.cpp
     src/enemy.cpp
     src/viewmodel.cpp
+    src/rifle_view.cpp
     src/weapon_models.cpp
     src/materials.cpp
     src/audio.cpp
@@ -52,7 +53,7 @@ endif()
 add_test(NAME player_test COMMAND player_test)
 
 add_executable(enemy_test tests/enemy_test.cpp src/enemy.cpp src/world.cpp src/weapon.cpp src/player.cpp
-    src/viewmodel.cpp src/weapon_models.cpp src/character.cpp src/effects.cpp src/render.cpp src/materials.cpp)
+    src/viewmodel.cpp src/rifle_view.cpp src/weapon_models.cpp src/character.cpp src/effects.cpp src/render.cpp src/materials.cpp)
 target_link_libraries(enemy_test PRIVATE raylib)
 if (WIN32)
     target_link_libraries(enemy_test PRIVATE winmm opengl32)

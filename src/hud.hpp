@@ -26,6 +26,8 @@ struct State {
     float deathTimer = 0.0f;      // seconds until respawn
     float hurt = 0.0f;            // recent damage (0..1), red screen edges
     // Weapon
+    int weapon = 1;               // 0 = rifle (magazine panel), 1 = revolver (cylinder panel)
+    const char* weaponNames[2] = { "FAL", "REVOLVER" };
     int ammo = 6, magazine = 6;
     bool reloading = false;
     float reloadProgress = 0.0f;

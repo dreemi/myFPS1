@@ -13,6 +13,7 @@ void Shutdown();
 void Update(float dt);
 void Draw(const Camera3D& camera); // in the world pass, after opaque geometry
 void Clear();
+void SetWorld(const World* world); // what falling cases and magazines land on (else just the ground)
 
 // A bullet hit a surface: sparks/dust/chips and a bullet hole
 void Impact(Vector3 point, Vector3 normal, Surface surface);
@@ -26,11 +27,13 @@ void Tracer(Vector3 from, Vector3 to, Color color);
 void GunSmoke(Vector3 muzzle, Vector3 dir, float amount);
 
 // Spent brass (and dumped live rounds): falls, bounces, comes to rest on the ground
-void Casing(Vector3 position, Vector3 velocity, bool fired);
+// kind is the caller's (what to draw); restHeight = its centre's height lying on the ground;
+// flat = comes to rest on its broad side (a magazine) rather than rolling on its axis (a case)
+void Casing(Vector3 position, Vector3 velocity, int kind, float restHeight = 0.0055f, bool flat = false);
 // Draws them with the given cartridge drawer (origin at the rim, bullet along -Z); in the world pass
-void DrawCasings(void (*draw)(Matrix transform, bool fired));
+void DrawCasings(void (*draw)(Matrix transform, int kind));
 // Where cases hit the ground since the last call, and how hard (0..1), for sounds
-struct CasingBounce { Vector3 position; float strength; };
+struct CasingBounce { Vector3 position; float strength; int kind; };
 std::vector<CasingBounce> TakeCasingBounces();
 
 // A painted ring with an arrow on the ground (spawn points); yaw = arrow direction (0 = +Z)

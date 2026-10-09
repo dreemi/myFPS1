@@ -11,11 +11,12 @@ mesh 8 torso torso_body
 mesh 9 torso torso_suit
 mesh 10 upperarms upperarms_body
 mesh 11 upperarms upperarms_suit
-# animations: crouch crouch_walk fp_hold idle rest run walk
+# animations: crouch crouch_walk fp_hold fp_rifle idle rest run walk
 # right-hand grip point (palm centre), model space (Y up, facing +Z), meters
 aim_grip -0.0186 1.3616 0.4972
 aim_hand -0.0400 1.3968 0.4456
 fp_grip -0.1676 1.4298 0.5865
+fp_rifle_grip -0.0767 1.4521 0.2273
 eye 0.0005 1.6873 0.1366
 # fp_hold frames: 0 hip, 1..90 reload (3.0 s), 91..100 aim; left palm centre per frame (model space)
 fp_left 0 -0.1153 1.4106 0.5116
@@ -119,3 +120,135 @@ fp_left 97 -0.0429 1.4608 0.5450
 fp_left 98 -0.0280 1.4706 0.5496
 fp_left 99 -0.0122 1.4807 0.5539
 fp_left 100 0.0045 1.4911 0.5576
+# fp_rifle frames: 0 hip, 1..60 magazine swap, 61..78 finish, 79..120 finish from empty, 121..130 aim
+fp_rifle_left 0 -0.0677 1.4924 0.4960
+fp_rifle_left 1 -0.0677 1.4924 0.4960
+fp_rifle_left 2 -0.0598 1.4962 0.4981
+fp_rifle_left 3 -0.0392 1.5064 0.5032
+fp_rifle_left 4 -0.0097 1.5192 0.5048
+fp_rifle_left 5 0.0234 1.5282 0.4882
+fp_rifle_left 6 0.0532 1.5344 0.4579
+fp_rifle_left 7 0.0747 1.5387 0.4214
+fp_rifle_left 8 0.0861 1.5411 0.3868
+fp_rifle_left 9 0.0900 1.5418 0.3625
+fp_rifle_left 10 0.0936 1.5456 0.3556
+fp_rifle_left 11 0.0998 1.5488 0.3583
+fp_rifle_left 12 0.1075 1.5492 0.3627
+fp_rifle_left 13 0.1144 1.5485 0.3672
+fp_rifle_left 14 0.1184 1.5484 0.3705
+fp_rifle_left 15 0.1228 1.5440 0.3698
+fp_rifle_left 16 0.1375 1.5245 0.3628
+fp_rifle_left 17 0.1561 1.4998 0.3536
+fp_rifle_left 18 0.1710 1.4810 0.3463
+fp_rifle_left 19 0.1750 1.4754 0.3452
+fp_rifle_left 20 0.1649 1.4381 0.3577
+fp_rifle_left 21 0.1452 1.3673 0.3804
+fp_rifle_left 22 0.1214 1.2827 0.4073
+fp_rifle_left 23 0.0993 1.2042 0.4320
+fp_rifle_left 24 0.0882 1.1678 0.4304
+fp_rifle_left 25 0.0870 1.1651 0.4257
+fp_rifle_left 26 0.0870 1.1651 0.4257
+fp_rifle_left 27 0.0870 1.1651 0.4257
+fp_rifle_left 28 0.0870 1.1651 0.4257
+fp_rifle_left 29 0.0870 1.1651 0.4257
+fp_rifle_left 30 0.0870 1.1651 0.4257
+fp_rifle_left 31 0.0870 1.1651 0.4257
+fp_rifle_left 32 0.0870 1.1651 0.4257
+fp_rifle_left 33 0.0887 1.1709 0.4350
+fp_rifle_left 34 0.0979 1.2097 0.4331
+fp_rifle_left 35 0.1137 1.2761 0.4149
+fp_rifle_left 36 0.1312 1.3496 0.3948
+fp_rifle_left 37 0.1477 1.4192 0.3757
+fp_rifle_left 38 0.1607 1.4740 0.3606
+fp_rifle_left 39 0.1676 1.5033 0.3526
+fp_rifle_left 40 0.1638 1.5103 0.3540
+fp_rifle_left 41 0.1468 1.5308 0.3622
+fp_rifle_left 42 0.1283 1.5533 0.3710
+fp_rifle_left 43 0.1209 1.5623 0.3746
+fp_rifle_left 44 0.1187 1.5633 0.3737
+fp_rifle_left 45 0.1141 1.5658 0.3715
+fp_rifle_left 46 0.1087 1.5689 0.3690
+fp_rifle_left 47 0.1040 1.5717 0.3668
+fp_rifle_left 48 0.1016 1.5734 0.3657
+fp_rifle_left 49 0.1183 1.5400 0.3593
+fp_rifle_left 50 0.1414 1.4978 0.3524
+fp_rifle_left 51 0.1384 1.5071 0.3562
+fp_rifle_left 52 0.1323 1.5140 0.3600
+fp_rifle_left 53 0.1278 1.5095 0.3620
+fp_rifle_left 54 0.1221 1.5031 0.3665
+fp_rifle_left 55 0.1154 1.4964 0.3730
+fp_rifle_left 56 0.1081 1.4899 0.3803
+fp_rifle_left 57 0.1008 1.4838 0.3874
+fp_rifle_left 58 0.0944 1.4788 0.3936
+fp_rifle_left 59 0.0899 1.4754 0.3979
+fp_rifle_left 60 0.0882 1.4741 0.3995
+fp_rifle_left 61 0.0882 1.4741 0.3995
+fp_rifle_left 62 0.0865 1.4748 0.4018
+fp_rifle_left 63 0.0818 1.4768 0.4079
+fp_rifle_left 64 0.0745 1.4798 0.4171
+fp_rifle_left 65 0.0650 1.4838 0.4284
+fp_rifle_left 66 0.0536 1.4883 0.4410
+fp_rifle_left 67 0.0408 1.4933 0.4540
+fp_rifle_left 68 0.0271 1.4983 0.4667
+fp_rifle_left 69 0.0130 1.5030 0.4784
+fp_rifle_left 70 -0.0010 1.5068 0.4884
+fp_rifle_left 71 -0.0145 1.5093 0.4963
+fp_rifle_left 72 -0.0271 1.5100 0.5015
+fp_rifle_left 73 -0.0413 1.5086 0.5112
+fp_rifle_left 74 -0.0481 1.5037 0.5020
+fp_rifle_left 75 -0.0562 1.4991 0.4996
+fp_rifle_left 76 -0.0623 1.4955 0.4977
+fp_rifle_left 77 -0.0663 1.4932 0.4964
+fp_rifle_left 78 -0.0677 1.4924 0.4960
+fp_rifle_left 79 0.0882 1.4741 0.3995
+fp_rifle_left 80 0.0864 1.4800 0.4021
+fp_rifle_left 81 0.0829 1.4959 0.4086
+fp_rifle_left 82 0.0807 1.5199 0.4173
+fp_rifle_left 83 0.0825 1.5491 0.4260
+fp_rifle_left 84 0.0898 1.5800 0.4330
+fp_rifle_left 85 0.1018 1.6089 0.4370
+fp_rifle_left 86 0.1160 1.6318 0.4381
+fp_rifle_left 87 0.1284 1.6456 0.4372
+fp_rifle_left 88 0.1349 1.6482 0.4359
+fp_rifle_left 89 0.1380 1.6472 0.4351
+fp_rifle_left 90 0.1398 1.6468 0.4346
+fp_rifle_left 91 0.1407 1.6467 0.4345
+fp_rifle_left 92 0.1408 1.6469 0.4345
+fp_rifle_left 93 0.1404 1.6474 0.4348
+fp_rifle_left 94 0.1396 1.6480 0.4350
+fp_rifle_left 95 0.1387 1.6487 0.4353
+fp_rifle_left 96 0.1379 1.6493 0.4353
+fp_rifle_left 97 0.1372 1.6498 0.4352
+fp_rifle_left 98 0.1349 1.6497 0.4310
+fp_rifle_left 99 0.1280 1.6487 0.4181
+fp_rifle_left 100 0.1182 1.6469 0.3996
+fp_rifle_left 101 0.1072 1.6449 0.3791
+fp_rifle_left 102 0.0971 1.6432 0.3601
+fp_rifle_left 103 0.0898 1.6422 0.3460
+fp_rifle_left 104 0.0873 1.6421 0.3402
+fp_rifle_left 105 0.0904 1.6462 0.3328
+fp_rifle_left 106 0.0952 1.6553 0.3222
+fp_rifle_left 107 0.0951 1.6646 0.3174
+fp_rifle_left 108 0.0909 1.6584 0.3270
+fp_rifle_left 109 0.0853 1.6452 0.3483
+fp_rifle_left 110 0.0769 1.6277 0.3773
+fp_rifle_left 111 0.0645 1.6069 0.4103
+fp_rifle_left 112 0.0479 1.5844 0.4432
+fp_rifle_left 113 0.0278 1.5616 0.4723
+fp_rifle_left 114 0.0060 1.5407 0.4940
+fp_rifle_left 115 -0.0156 1.5239 0.5066
+fp_rifle_left 116 -0.0326 1.5128 0.5044
+fp_rifle_left 117 -0.0469 1.5045 0.5012
+fp_rifle_left 118 -0.0580 1.4980 0.4985
+fp_rifle_left 119 -0.0652 1.4939 0.4966
+fp_rifle_left 120 -0.0677 1.4924 0.4960
+fp_rifle_left 121 -0.0677 1.4924 0.4960
+fp_rifle_left 122 -0.0638 1.4915 0.4981
+fp_rifle_left 123 -0.0534 1.4963 0.5029
+fp_rifle_left 124 -0.0382 1.5056 0.5089
+fp_rifle_left 125 -0.0199 1.5183 0.5149
+fp_rifle_left 126 -0.0007 1.5328 0.5198
+fp_rifle_left 127 0.0175 1.5476 0.5232
+fp_rifle_left 128 0.0327 1.5611 0.5250
+fp_rifle_left 129 0.0431 1.5719 0.5256
+fp_rifle_left 130 0.0469 1.5783 0.5253

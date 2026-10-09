@@ -7,7 +7,8 @@
 // Short effects, synthesized at startup (no files)
 enum class Sfx {
     ImpactConcrete, ImpactSteel, ImpactWood, FleshHit, HitTick, Headshot, KillConfirm,
-    BulletCrack, Hurt, DryFire, Land, CasingTink, Count
+    BulletCrack, Hurt, DryFire, Land, CasingTink,
+    RifleBoom, MagOut, MagIn, MagSlap, ChargeBack, ChargeRelease, MagDrop, WeaponDraw, Count
 };
 
 // The revolver's reload, step by step (cut from the reload recording so each
@@ -27,6 +28,8 @@ public:
     void PlayGunshot(float volume, float pan);
     // A gunshot heard from `source` by a listener at `ear` facing with `right` as their right
     void PlayGunshotAt(Vector3 source, Vector3 ear, Vector3 right);
+    // The rifle: the same recording, deeper, with a heavier boom under it
+    void PlayRifleShot(float volume, float pan);
 
     void PlayReloadStep(ReloadStep step);
     void StopReload();

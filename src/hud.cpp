@@ -155,6 +155,45 @@ static void HealthPanel(const State& s) {
 static void AmmoPanel(const State& s) {
     float cx = s.screenW - 78.0f, cy = s.screenH - 76.0f, R = 42.0f;
     Panel({ s.screenW - 278.0f, cy - 52.0f, 254.0f, 104.0f });
+
+    // Weapon slots above the panel: the one in hand is lit
+    for (int i = 0; i < 2; i++) {
+        float x = s.screenW - 278.0f + i * 128.0f;
+        bool on = s.weapon == i;
+        Panel({ x, cy - 88.0f, 124.0f, 30.0f });
+        if (on) DrawRectangleRec({ x, cy - 60.0f, 124.0f, 2.0f }, ACCENT);
+        Text(TextFormat("%d  %s", i + 1, s.weaponNames[i]), x + 10.0f, cy - 81.0f, 15, on ? TEXT : DIM);
+    }
+
+    if (s.weapon == 0) {
+        // The rifle's magazine from the side: rounds stacked in two staggered columns,
+        // fed from the top, so the stack shrinks downward
+        Rectangle mag = { cx - 20.0f, cy - 46.0f, 40.0f, 92.0f };
+        DrawRectangleRounded(mag, 0.12f, 6, { 34, 34, 38, 230 });
+        DrawRectangleRoundedLinesEx(mag, 0.12f, 6, 2.0f, { 80, 80, 86, 255 });
+        int rows = (s.magazine + 1) / 2;
+        float rowH = (mag.height - 12.0f) / rows;
+        for (int i = 0; i < s.magazine; i++) {
+            int row = i / 2, col = i % 2;
+            float y = mag.y + mag.height - 6.0f - (row + 1) * rowH + (col ? rowH * 0.5f : 0.0f);
+            Rectangle r = { mag.x + 6.0f + col * 13.0f, y, 15.0f, rowH * 0.62f };
+            bool loaded = i < s.ammo && !s.reloading;
+            DrawRectangleRec(r, loaded ? BRASS : Color{ 60, 60, 64, 255 });
+            if (loaded) DrawRectangleRec({ r.x, r.y, 3.0f, r.height }, { 150, 112, 56, 255 }); // case head
+        }
+        if (s.reloading) {
+            DrawRectangleRec({ mag.x - 8.0f, mag.y + mag.height * (1.0f - s.reloadProgress), 3.0f,
+                               mag.height * s.reloadProgress }, ACCENT);
+            Text("RELOADING", cx - R - 18, cy - 30, 18, ACCENT, RIGHT);
+        }
+        Color c = s.ammo == 0 && !s.reloading ? DANGER : TEXT;
+        Text(TextFormat("%d", s.reloading ? 0 : s.ammo), cx - R - 18, cy - 8, 46, c, RIGHT);
+        Text(TextFormat("/ %d", s.magazine), cx - R - 18, cy + 34, 16, DIM, RIGHT);
+        if (s.ammo == 0 && !s.reloading && s.alive)
+            Text("[R] RELOAD", s.screenW / 2.0f, s.screenH / 2.0f + 40.0f, 18, DANGER, CENTER, 0.6f + 0.4f * sinf((float)GetTime() * 8.0f));
+        return;
+    }
+
     // The revolver's cylinder: six chambers, loaded ones are brass
     DrawCircleV({ cx, cy }, R, { 34, 34, 38, 230 });
     DrawRing({ cx, cy }, R - 3, R, 0, 360, 48, { 80, 80, 86, 255 });
@@ -225,11 +264,12 @@ static void Vignette(const State& s) {
 static const char* CONTROLS[][2] = {
     { "WASD", "Move" }, { "MOUSE", "Look" }, { "SPACE", "Jump" }, { "SHIFT", "Sprint" },
     { "CTRL / C", "Crouch" }, { "Q / E", "Lean" }, { "LMB", "Fire" }, { "RMB", "Aim" },
-    { "R", "Reload" }, { "ENTER", "Respawn at other end" }, { "ESC", "Pause" }, { "F3", "Show FPS" },
+    { "R", "Reload" }, { "1 / 2 / WHEEL", "Switch weapon" }, { "ENTER", "Respawn at other end" }, { "ESC", "Pause" },
+    { "F3", "Show FPS" },
 };
 
 static void Controls(float x, float y, float alpha) {
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < (int)(sizeof(CONTROLS) / sizeof(CONTROLS[0])); i++) {
         float cx = x + (i % 2) * 250.0f, cy = y + (i / 2) * 30.0f;
         Text(CONTROLS[i][0], cx + 90, cy, 18, ACCENT, RIGHT, alpha);
         Text(CONTROLS[i][1], cx + 104, cy, 18, TEXT, LEFT, alpha);

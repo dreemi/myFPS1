@@ -4,6 +4,7 @@
 #include "player.hpp"
 #include "weapon.hpp"
 #include "viewmodel.hpp"
+#include "rifle_view.hpp"
 #include "world.hpp"
 #include "enemy.hpp"
 #include "materials.hpp"
@@ -46,6 +47,7 @@ int main(int argc, char** argv) {
     // Lighting: one lit shader for the level, characters and guns
     Render::Init(assetDir);
     Fx::Init();
+    Fx::SetWorld(&world); // dropped brass and magazines land on whatever they hit
     Hud::Init();
     Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
@@ -58,9 +60,17 @@ int main(int argc, char** argv) {
 
     Player player;
     player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
-    Weapon gun(REVOLVER, (unsigned)GetRandomValue(0, 1 << 30)); // gameplay
-    ViewModel viewModel(REVOLVER_MODELS);                           // how the local player sees it
-    viewModel.arms = &character;
+    // Two weapons: the FAL (primary) and the revolver. Gameplay in Weapon, how
+    // the player sees each in its view.
+    Weapon rifle(FAL, (unsigned)GetRandomValue(0, 1 << 30));
+    Weapon revolver(REVOLVER, (unsigned)GetRandomValue(0, 1 << 30));
+    RifleView rifleView(FAL_MODELS);
+    ViewModel revolverView(REVOLVER_MODELS);
+    rifleView.arms = revolverView.arms = &character;
+    Weapon* weapons[2] = { &rifle, &revolver };
+    WeaponView* views[2] = { &rifleView, &revolverView };
+    int current = 0, wanted = 0; // in hand, and asked for (switching while they differ)
+    float holster = 0.0f;        // 0 = up, 1 = lowered out of sight
     float bodyPhase = 0.0f; // stride cycles walked, for your own legs
 
     std::vector<Enemy> enemies;
@@ -105,11 +115,16 @@ int main(int argc, char** argv) {
             if (nearest > bestDist) { bestDist = nearest; currentSpawn = i; }
         }
         player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
-        gun.Reset(); // a fresh life starts with a full cylinder
+        // A fresh life: both guns full, the rifle in hand
+        for (Weapon* w : weapons) w->Reset();
+        current = wanted = 0;
+        holster = 0.0f;
     };
 
     while (!WindowShouldClose() && !quit) {
         float dt = GetFrameTime();
+        Weapon& gun = *weapons[current];
+        WeaponView& viewModel = *views[current];
 
         // ---------- Menus ----------
         if (IsKeyPressed(KEY_F3)) showFps = !showFps;
@@ -128,19 +143,48 @@ int main(int argc, char** argv) {
         if (playing && player.IsAlive() && IsKeyPressed(KEY_ENTER)) {
             currentSpawn = (currentSpawn + 1) % (int)spawns.size();
             player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
-            gun.Reset();
+            for (Weapon* w : weapons) w->Reset();
         }
 
         // ---------- Update ----------
         if (playing) {
             if (player.IsAlive()) {
                 player.Update(dt, world);
+
+                // Switching: 1 / 2 or the mouse wheel. The gun in hand goes down (a reload
+                // in progress is abandoned), then the other comes up.
+                if (inputGrace == 0) {
+                    if (IsKeyPressed(KEY_ONE)) wanted = 0;
+                    if (IsKeyPressed(KEY_TWO)) wanted = 1;
+                    if (GetMouseWheelMove() != 0.0f) wanted = 1 - wanted;
+                }
+                if (wanted != current) {
+                    if (gun.IsReloading()) {
+                        gun.CancelReload();
+                        audio.StopReload();
+                    }
+                    holster = std::min(1.0f, holster + dt / 0.22f);
+                    if (holster >= 1.0f) {
+                        current = wanted;
+                        audio.Play(Sfx::WeaponDraw, 0.6f);
+                    }
+                } else {
+                    holster = std::max(0.0f, holster - dt / 0.30f);
+                }
+                for (int i = 0; i < 2; i++) views[i]->holster = i == current ? holster : 1.0f;
+
                 bool wasReloading = gun.IsReloading();
-                bool fired = inputGrace > 0 ? (gun.Tick(dt, player.GetStance()), false)
-                                            : gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance());
+                bool busy = inputGrace > 0 || holster > 0.0f || wanted != current;
+                if (busy) {
+                    gun.UpdateAim(dt, false);
+                    gun.Tick(dt, player.GetStance());
+                }
+                bool fired = busy ? false : gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance());
                 if (fired) {
-                    audio.PlayGunshot(0.8f, 0.0f);
-                    punchPitch += Lerp(2.4f, 1.1f, gun.GetAimAmount());
+                    bool isRifle = &gun == &rifle;
+                    if (isRifle) audio.PlayRifleShot(0.85f, 0.0f);
+                    else audio.PlayGunshot(0.8f, 0.0f);
+                    punchPitch += isRifle ? Lerp(1.2f, 0.6f, gun.GetAimAmount()) : Lerp(2.4f, 1.1f, gun.GetAimAmount());
                     punchYaw += GetRandomValue(-100, 100) / 100.0f * 0.5f;
                     // Effects: a tracer and smoke from where the gun's muzzle appears, then whatever it hit
                     const ShotResult& shot = gun.LastShot();
@@ -182,14 +226,26 @@ int main(int argc, char** argv) {
                 viewModel.Update(dt, MotionOf(player), gun, &player.GetCamera());
                 // The revolver's mechanism: reload sounds on their beats, cases dropping into the world
                 ViewModelEvents vmEvents = viewModel.TakeEvents();
-                if (vmEvents.latch) audio.PlayReloadStep(ReloadStep::Latch);
-                if (vmEvents.open) audio.PlayReloadStep(ReloadStep::Open);
-                if (vmEvents.eject) audio.PlayReloadStep(ReloadStep::Eject);
-                if (vmEvents.insert) audio.PlayReloadStep(ReloadStep::Insert);
-                if (vmEvents.spin) audio.PlayReloadStep(ReloadStep::Spin);
-                if (vmEvents.close) audio.PlayReloadStep(ReloadStep::Close);
-                for (const ViewModelEvents::Casing& cs : vmEvents.casings)
-                    Fx::Casing(cs.position, Vector3Add(cs.velocity, player.GetVelocity()), cs.fired);
+                for (ViewSound s : vmEvents.sounds) {
+                    switch (s) {
+                        case ViewSound::Latch: audio.PlayReloadStep(ReloadStep::Latch); break;
+                        case ViewSound::Open: audio.PlayReloadStep(ReloadStep::Open); break;
+                        case ViewSound::Eject: audio.PlayReloadStep(ReloadStep::Eject); break;
+                        case ViewSound::Insert: audio.PlayReloadStep(ReloadStep::Insert); break;
+                        case ViewSound::Spin: audio.PlayReloadStep(ReloadStep::Spin); break;
+                        case ViewSound::Close: audio.PlayReloadStep(ReloadStep::Close); break;
+                        case ViewSound::MagOut: audio.Play(Sfx::MagOut, 0.8f); break;
+                        case ViewSound::MagIn: audio.Play(Sfx::MagIn, 0.85f); break;
+                        case ViewSound::Slap: audio.Play(Sfx::MagSlap, 0.7f); break;
+                        case ViewSound::ChargeBack: audio.Play(Sfx::ChargeBack, 0.8f); break;
+                        case ViewSound::ChargeRelease: audio.Play(Sfx::ChargeRelease, 0.9f); break;
+                    }
+                }
+                for (const ViewModelEvents::Debris& d : vmEvents.debris) {
+                    bool mag = d.kind == DEBRIS_RIFLE_MAG;
+                    Fx::Casing(d.position, Vector3Add(d.velocity, player.GetVelocity()), d.kind,
+                               mag ? 0.0136f : (d.kind == DEBRIS_RIFLE_CASE ? 0.006f : 0.0055f), mag);
+                }
                 // Smoke keeps curling off the muzzle for a moment after a shot
                 if (muzzleSmoke > 0.0f) {
                     smokeTimer -= dt;
@@ -261,8 +317,11 @@ int main(int argc, char** argv) {
                 }
             }
             Fx::Update(dt);
-            for (const Fx::CasingBounce& b : Fx::TakeCasingBounces())
-                audio.PlayAt(Sfx::CasingTink, b.position, player.GetCamera().position, player.GetRight(), 0.25f + 0.5f * b.strength);
+            for (const Fx::CasingBounce& b : Fx::TakeCasingBounces()) {
+                bool mag = b.kind == DEBRIS_RIFLE_MAG;
+                audio.PlayAt(mag ? Sfx::MagDrop : Sfx::CasingTink, b.position, player.GetCamera().position, player.GetRight(),
+                             (mag ? 0.4f : 0.25f) + 0.5f * b.strength);
+            }
             hurt = std::max(0.0f, hurt - dt * 1.2f);
             shake = std::max(0.0f, shake - dt * 3.0f);
             killBanner = std::max(0.0f, killBanner - dt);
@@ -367,7 +426,7 @@ int main(int argc, char** argv) {
             drawPlayerBody(PART_LEGS);
             for (const SpawnPoint& s : spawns)
                 Fx::DrawGroundMarker(s.position, 1.3f, s.yaw, { s.color.r, s.color.g, s.color.b, 170 });
-            Fx::DrawCasings(DrawCartridge);
+            Fx::DrawCasings(DrawDebris);
             Render::SurfaceObject(0.25f);
             Fx::Draw(cam);
         Render::EndWorldPass();
@@ -403,6 +462,7 @@ int main(int argc, char** argv) {
         hs.alive = player.IsAlive();
         hs.deathTimer = deathTimer;
         hs.hurt = hurt;
+        hs.weapon = current == 0 ? 0 : 1;
         hs.ammo = gun.GetAmmo();
         hs.magazine = gun.GetDef().magazineSize;
         hs.reloading = gun.IsReloading();
@@ -415,7 +475,7 @@ int main(int argc, char** argv) {
         hs.hitHeadshot = gun.LastHitHeadshot();
         hs.killBanner = killBanner;
         hs.killBannerHeadshot = killBannerHeadshot;
-        hs.kills = gun.GetKills();
+        hs.kills = rifle.GetKills() + revolver.GetKills();
         hs.deaths = deaths;
         hs.damage = &damageMarkers;
         hs.feed = &feed;

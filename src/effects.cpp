@@ -44,7 +44,9 @@ struct Brass {
     Vector3 spinAxis;
     float spinRate;      // rad/s
     float life;
-    bool fired, resting;
+    int kind;
+    float restHeight;
+    bool flat, resting;
 };
 static std::vector<Brass> brass;
 static std::vector<CasingBounce> bounces;
@@ -264,7 +266,7 @@ void GunSmoke(Vector3 muzzle, Vector3 dir, float amount) {
     }
 }
 
-void Casing(Vector3 position, Vector3 velocity, bool fired) {
+void Casing(Vector3 position, Vector3 velocity, int kind, float restHeight, bool flat) {
     if (!ready) return;
     if (brass.size() >= MAX_BRASS) brass.erase(brass.begin());
     Brass b;
@@ -274,13 +276,15 @@ void Casing(Vector3 position, Vector3 velocity, bool fired) {
     b.spinAxis = RandUnit();
     b.spinRate = Rand(8.0f, 22.0f);
     b.life = 0.0f;
-    b.fired = fired;
+    b.kind = kind;
+    b.restHeight = restHeight;
+    b.flat = flat;
     b.resting = false;
     brass.push_back(b);
 }
 
-void DrawCasings(void (*draw)(Matrix, bool)) {
-    for (const Brass& b : brass) draw(MatrixMultiply(b.rot, MatrixTranslate(b.pos.x, b.pos.y, b.pos.z)), b.fired);
+void DrawCasings(void (*draw)(Matrix, int)) {
+    for (const Brass& b : brass) draw(MatrixMultiply(b.rot, MatrixTranslate(b.pos.x, b.pos.y, b.pos.z)), b.kind);
 }
 
 std::vector<CasingBounce> TakeCasingBounces() {
@@ -289,18 +293,35 @@ std::vector<CasingBounce> TakeCasingBounces() {
     return out;
 }
 
+static const World* level = nullptr;
+
+void SetWorld(const World* world) { level = world; }
+
+// Top of whatever is under p (the ground, or a box's top at or below p)
+static float FloorAt(Vector3 p) {
+    float floor = 0.0f;
+    if (!level) return floor;
+    for (const WorldBox& box : *level) {
+        BoundingBox bb = box.Bounds();
+        if (bb.max.y <= p.y + 0.02f && bb.max.y > floor && p.x > bb.min.x && p.x < bb.max.x && p.z > bb.min.z &&
+            p.z < bb.max.z)
+            floor = bb.max.y;
+    }
+    return floor;
+}
+
 static void UpdateBrass(float dt) {
-    const float RADIUS = 0.0055f; // lying on its side, the case's centre is this high
     for (Brass& b : brass) {
         b.life += dt;
         if (b.resting) continue;
         b.vel.y -= 9.81f * dt;
         b.pos = Vector3Add(b.pos, Vector3Scale(b.vel, dt));
         b.rot = MatrixMultiply(b.rot, MatrixRotate(b.spinAxis, b.spinRate * dt));
-        if (b.pos.y < RADIUS && b.vel.y < 0.0f) {
+        float rest = FloorAt(b.pos) + b.restHeight; // lying down, its centre is this high
+        if (b.pos.y < rest && b.vel.y < 0.0f) {
             float impact = -b.vel.y;
-            b.pos.y = RADIUS;
-            if (impact > 0.6f) bounces.push_back({ b.pos, Clamp(impact / 4.0f, 0.15f, 1.0f) });
+            b.pos.y = rest;
+            if (impact > 0.6f) bounces.push_back({ b.pos, Clamp(impact / 4.0f, 0.15f, 1.0f), b.kind });
             // Bounce: lose most of the height, skitter sideways, tumble differently
             b.vel.y = impact * 0.32f;
             b.vel.x = b.vel.x * 0.55f + Rand(-0.6f, 0.6f) * impact * 0.3f;  // brass skitters off at odd angles
@@ -314,7 +335,8 @@ static void UpdateBrass(float dt) {
                 if (Vector3LengthSqr(axis) < 1e-4f) axis = { 1, 0, 0 };
                 axis = Vector3Normalize(axis);
                 float yaw = atan2f(axis.x, axis.z);
-                b.rot = MatrixMultiply(MatrixRotateZ(Rand(0, 2 * PI)), MatrixRotateY(yaw));
+                float roll = b.flat ? (Rand(0, 1) < 0.5f ? PI / 2 : -PI / 2) : Rand(0, 2 * PI);
+                b.rot = MatrixMultiply(MatrixRotateZ(roll), MatrixRotateY(yaw));
                 b.resting = true;
                 b.vel = { 0, 0, 0 };
             }
