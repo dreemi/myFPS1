@@ -71,6 +71,11 @@ bool LoadWeaponModelAssets(const char* assetDir) {
     return true;
 }
 
+void SetWeaponModelShader(Shader shader) {
+    if (!revolverLoaded) return;
+    for (int i = 0; i < revolver.materialCount; i++) revolver.materials[i].shader = shader;
+}
+
 void UnloadWeaponModelAssets() {
     if (revolverLoaded) UnloadModel(revolver);
     revolverLoaded = false;

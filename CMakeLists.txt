@@ -28,6 +28,7 @@ add_executable(fps
     src/materials.cpp
     src/audio.cpp
     src/character.cpp
+    src/render.cpp
 )
 target_link_libraries(fps PRIVATE raylib)
 

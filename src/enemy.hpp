@@ -78,6 +78,7 @@ public:
     float GetAnimPhase() const { return animPhase; }
     Vector3 GetMoveTarget() const { return moveTarget; }
     Vector3 GetMuzzle() const;   // tip of its pistol, for tracers/flash
+    bool IsMuzzleFlashing() const { return alive && muzzleFlash > 0.0f; }
     int GetHealth() const { return health; }
     int GetMaxHealth() const { return maxHealth; }
     Vector3 GetFeet() const { return feet; }

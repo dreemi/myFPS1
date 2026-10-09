@@ -29,18 +29,33 @@ static Texture2D LoadSurfaceTexture(const std::string& colorPath, const std::str
     return tex;
 }
 
+// Normal / roughness maps: used as data by the lit shader, same filtering
+static Texture2D LoadDataTexture(const std::string& path) {
+    Texture2D tex = LoadTexture(path.c_str());
+    if (tex.id == 0) return tex;
+    GenTextureMipmaps(&tex);
+    SetTextureFilter(tex, TEXTURE_FILTER_TRILINEAR);
+    SetTextureFilter(tex, TEXTURE_FILTER_ANISOTROPIC_16X);
+    SetTextureWrap(tex, TEXTURE_WRAP_REPEAT);
+    return tex;
+}
+
 WorldMaterials LoadWorldMaterials(const std::string& assetDir) {
     WorldMaterials m;
     m.concrete = LoadSurfaceTexture(assetDir + "textures/paving_color.jpg", assetDir + "textures/paving_ao.jpg");
     m.steel = LoadSurfaceTexture(assetDir + "textures/steel_color.jpg", assetDir + "textures/steel_ao.jpg");
-    m.loaded = m.concrete.id != 0 && m.steel.id != 0;
+    m.concreteNormal = LoadDataTexture(assetDir + "textures/paving_normal.jpg");
+    m.concreteRough = LoadDataTexture(assetDir + "textures/paving_roughness.jpg");
+    m.steelNormal = LoadDataTexture(assetDir + "textures/steel_normal.jpg");
+    m.steelRough = LoadDataTexture(assetDir + "textures/steel_roughness.jpg");
+    m.loaded = m.concrete.id && m.steel.id && m.concreteNormal.id && m.concreteRough.id && m.steelNormal.id && m.steelRough.id;
     if (!m.loaded) TraceLog(LOG_WARNING, "MATERIALS: textures missing from %s, using plain colors", assetDir.c_str());
     return m;
 }
 
 void UnloadWorldMaterials(WorldMaterials& m) {
-    if (m.concrete.id) UnloadTexture(m.concrete);
-    if (m.steel.id) UnloadTexture(m.steel);
+    for (Texture2D t : { m.concrete, m.concreteNormal, m.concreteRough, m.steel, m.steelNormal, m.steelRough })
+        if (t.id) UnloadTexture(t);
     m = WorldMaterials{};
 }
 

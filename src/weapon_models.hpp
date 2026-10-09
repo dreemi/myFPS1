@@ -42,3 +42,4 @@ extern const WeaponModels REVOLVER_MODELS; // looks like the revolver model in a
 // the weapons draw as a plain placeholder box.
 bool LoadWeaponModelAssets(const char* assetDir);
 void UnloadWeaponModelAssets();
+void SetWeaponModelShader(Shader shader); // e.g. the lit shader

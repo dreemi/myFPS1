@@ -5,8 +5,10 @@
 
 // Textures for the world's surfaces (see Surface in world.hpp)
 struct WorldMaterials {
-    Texture2D concrete{};  // ground and walls
+    Texture2D concrete{};  // ground and walls (colour with ambient occlusion baked in)
+    Texture2D concreteNormal{}, concreteRough{};
     Texture2D steel{};     // cover
+    Texture2D steelNormal{}, steelRough{};
     float concreteTile = 3.0f; // meters per texture repeat
     float steelTile = 2.0f;
     bool loaded = false;

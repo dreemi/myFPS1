@@ -7,7 +7,9 @@
 #include "materials.hpp"
 #include "audio.hpp"
 #include "character.hpp"
+#include "render.hpp"
 #include "raymath.h"
+#include "rlgl.h"
 #include <algorithm>
 #include <string>
 
@@ -31,7 +33,18 @@ int main() {
     LoadCharacter(character, assetDir);
 
     World world = BuildTestWorld();
-    Model ground = LoadGroundModel(ARENA_WIDTH, ARENA_LENGTH, materials);
+    Model ground = LoadGroundModel(ARENA_WIDTH, ARENA_LENGTH, materials); // only used if lighting is unavailable
+
+    // Lighting: one lit shader for the level, characters and guns
+    Render::Init(assetDir);
+    Render::BuildLevel(world, materials);
+    Render::ApplyLitShader(character.model);
+    SetWeaponModelShader(Render::LitShader());
+    Model unitCube = LoadModelFromMesh(GenMeshCube(1, 1, 1));            // practice targets
+    Model spawnPad = LoadModelFromMesh(GenMeshCylinder(1.2f, 0.02f, 32)); // spawn markers
+    Render::ApplyLitShader(unitCube);
+    Render::ApplyLitShader(spawnPad);
+    float sunOnGun = 1.0f; // eases between 0 (player in shade) and 1
     std::vector<SpawnPoint> spawns = GetSpawnPoints();
     int currentSpawn = GetRandomValue(0, (int)spawns.size() - 1);
 
@@ -132,23 +145,12 @@ int main() {
         audio.UpdateFootsteps(player.GetStance(), player.IsAlive() && !paused);
 
         // ---------- Draw ----------
-        BeginDrawing();
-        ClearBackground({ 135, 190, 230, 255 });
+        const Camera3D& cam = player.GetCamera();
 
-        BeginMode3D(player.GetCamera());
-            DrawModel(ground, { 0, 0, 0 }, 1.0f, WHITE);
-
-            for (const SpawnPoint& s : spawns) {
-                DrawCylinder({ s.position.x, 0.02f, s.position.z }, 1.2f, 1.2f, 0.02f, 24, Fade(s.color, 0.8f));
-            }
-
-            for (const WorldBox& b : world) DrawWorldBox(b, materials);
-
-            for (const Enemy& e : enemies) e.Draw(&character);
-
-            // Your own body (no head or arms: the camera is in the head and the
-            // first-person arms are drawn with the gun), so you see your torso and
-            // legs when you look down
+        // Your own body (no head or arms: the camera is in the head and the
+        // first-person arms are drawn with the gun), so you see your legs when you
+        // look down. The whole body still casts a shadow.
+        auto drawPlayerBody = [&](int parts) {
             if (player.IsAlive() && character.loaded) {
                 CharAnim anim = CharAnim::Idle;
                 switch (player.GetStance()) {
@@ -165,17 +167,60 @@ int main() {
                 Vector3 f = { sinf(yaw), 0, cosf(yaw) };
                 Vector3 at = Vector3Subtract(player.GetFeet(), Vector3Scale(f, 0.18f));
                 Matrix toWorld = MatrixMultiply(MatrixRotateY(yaw), MatrixTranslate(at.x, at.y, at.z));
-                DrawCharacter(character, anim, CharacterFrame(character, anim, bodyPhase), toWorld, PART_LEGS, WHITE);
+                DrawCharacter(character, anim, CharacterFrame(character, anim, bodyPhase), toWorld, parts, WHITE);
             }
+        };
+        auto drawTargets = [&]() {
+            for (const WorldBox& b : world)
+                if (b.isTarget) DrawModelEx(unitCube, b.position, { 0, 1, 0 }, 0, b.size, b.hitFlash > 0.0f ? RED : b.color);
+        };
+
+        // Muzzle flashes light up their surroundings
+        Vector3 look = player.GetLookDirection();
+        Render::SetFlashLight(0, Vector3Add(cam.position, Vector3Add(Vector3Scale(look, 0.8f), Vector3Scale(player.GetRight(), 0.15f))),
+                              { 7.0f, 4.5f, 1.8f }, gun.IsMuzzleFlashing() ? 7.0f : 0.0f);
+        Render::SetFlashLight(1, enemies.empty() ? Vector3{} : enemies[0].GetMuzzle(), { 7.0f, 4.5f, 1.8f },
+                              !enemies.empty() && enemies[0].IsMuzzleFlashing() ? 7.0f : 0.0f);
+
+        // 1. Shadows from the sun
+        Render::BeginShadowPass();
+            Render::DrawLevel();
+            drawTargets();
+            for (const Enemy& e : enemies) e.Draw(&character);
+            drawPlayerBody(PART_ALL & ~PART_HEAD);
+        Render::EndShadowPass();
+
+        BeginDrawing();
+        ClearBackground(BLACK);
+        Render::DrawSky(cam, SCREEN_W, SCREEN_H);
+
+        // 2. The world, lit
+        Render::BeginWorldPass(cam);
+            if (Render::Ready()) {
+                Render::DrawLevel();
+            } else {
+                DrawModel(ground, { 0, 0, 0 }, 1.0f, WHITE);
+                for (const WorldBox& b : world) if (!b.isTarget) DrawWorldBox(b, materials);
+            }
+            for (const SpawnPoint& s : spawns) DrawModel(spawnPad, { s.position.x, 0.0f, s.position.z }, 1.0f, s.color);
+            drawTargets();
+            for (const Enemy& e : enemies) e.Draw(&character);
+            drawPlayerBody(PART_LEGS);
             for (const Tracer& t : tracers) DrawLine3D(t.from, t.to, Fade(YELLOW, t.life / 0.08f));
             gun.Draw3D();
-        EndMode3D();
+        Render::EndWorldPass();
 
-        // First-person weapon: its own pass on top of the world (never part of the world scene)
-        if (player.IsAlive()) viewModel.Draw(gun);
+        // 3. First-person weapon: its own pass on top of the world, lit like the
+        //    spot you're standing in (darker in shadow)
+        if (player.IsAlive()) {
+            sunOnGun += ((Render::SunVisible(cam.position, world) ? 1.0f : 0.0f) - sunOnGun) * (1.0f - expf(-8.0f * dt));
+            Render::SetViewModelLighting(cam, sunOnGun);
+            Render::SetFlashLight(0, { 0.15f, -0.08f, -0.9f }, { 7.0f, 4.5f, 1.8f }, gun.IsMuzzleFlashing() ? 1.5f : 0.0f);
+            Render::SetFlashLight(1, {}, {}, 0.0f);
+            viewModel.Draw(gun);
+        }
 
         // Enemy health bars, drawn in screen space above their heads
-        const Camera3D& cam = player.GetCamera();
         for (const Enemy& e : enemies) {
             if (!e.IsAlive()) continue;
             Vector3 top = Vector3Add(e.GetFeet(), { 0, e.GetHeight() + 0.35f, 0 });
@@ -218,6 +263,12 @@ int main() {
         EndDrawing();
     }
 
+    // Models share the lit shader: give them back the default before unloading
+    for (Model* m : { &unitCube, &spawnPad, &character.model }) Render::DetachLitShader(*m);
+    SetWeaponModelShader(Shader{ rlGetShaderIdDefault(), rlGetShaderLocsDefault() });
+    UnloadModel(unitCube);
+    UnloadModel(spawnPad);
+    Render::Shutdown();
     UnloadGroundModel(ground);
     UnloadWeaponModelAssets();
     UnloadWorldMaterials(materials);
