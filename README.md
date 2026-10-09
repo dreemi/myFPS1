@@ -13,12 +13,13 @@ Run `build/fps.exe` (assets are copied next to it on every build).
 
 | Key | Action |
 |---|---|
-| WASD | Move (Shift sprint, Ctrl crouch, Space jump) |
+| WASD | Move (Shift sprint, Ctrl or C crouch, Space jump) |
 | Mouse | Look; left click fire, right click aim down sights |
 | R | Reload |
 | Q / E | Lean |
 | Esc / Tab | Pause menu |
 | F3 | FPS counter |
+| Enter | Respawn at the other spawn |
 
 ## Layout
 
