@@ -136,6 +136,9 @@ private:
     int maxHealth = 100;
     int health = 100;
     float hitFlash = 0.0f;
+    float hitReact = 0.0f;                  // flinch timer
+    static constexpr float HIT_REACT_TIME = 0.18f;
+    Vector3 recoilDir = { 0, 0, -1 };       // away from the last shot (flinch / fall direction)
     float muzzleFlash = 0.0f;
     float respawnTimer = 0.0f;
     float alertTimer = 0.0f;     // > 0 while it knows where the player is

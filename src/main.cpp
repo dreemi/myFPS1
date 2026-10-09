@@ -9,6 +9,7 @@
 #include "character.hpp"
 #include "render.hpp"
 #include "effects.hpp"
+#include "hud.hpp"
 #include "raymath.h"
 #include "rlgl.h"
 #include <algorithm>
@@ -19,7 +20,7 @@ static const int SCREEN_H = 720;
 
 int main() {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    InitWindow(SCREEN_W, SCREEN_H, "Simple FPS - raylib");
+    InitWindow(SCREEN_W, SCREEN_H, "Dustyard");
     SetTargetFPS(60);
     DisableCursor(); // lock + hide the mouse for free-look
     InitAudioDevice();
@@ -39,6 +40,7 @@ int main() {
     // Lighting: one lit shader for the level, characters and guns
     Render::Init(assetDir);
     Fx::Init();
+    Hud::Init();
     Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
     SetWeaponModelShader(Render::LitShader());
@@ -61,11 +63,29 @@ int main() {
     enemies.emplace_back((unsigned)GetRandomValue(0, 1 << 30));
     for (Enemy& e : enemies) e.Spawn(player.GetFeet(), world);
 
+    bool started = false;      // title screen until the first click
     bool paused = false;
+    bool quit = false;
+    bool showFps = false;
+    int inputGrace = 0;        // frames to ignore the gun after a menu click
     int deaths = 0;
-    float damageFlash = 0.0f;  // red screen tint after being hit
-    float deathTimer = 0.0f;   // > 0 while showing "YOU DIED"
+    float hurt = 0.0f;         // recent damage, drives the red screen edges (0..1)
+    float deathTimer = 0.0f;   // > 0 while dead
+    float killBanner = 0.0f;   // "ELIMINATED" under the crosshair
+    bool killBannerHeadshot = false;
+    std::vector<Hud::DamageMarker> damageMarkers;
+    std::vector<Hud::FeedEntry> feed;
+    auto addFeed = [&](const std::string& text, Color color) {
+        feed.insert(feed.begin(), { text, color, 5.0f });
+        if (feed.size() > 4) feed.pop_back();
+    };
 
+    // Camera feel (visual only: the real aim is never moved)
+    float punchPitch = 0.0f, punchYaw = 0.0f; // degrees, kick when firing
+    float shake = 0.0f;                         // when hit
+
+    SetExitKey(KEY_NULL); // Esc pauses instead of quitting
+    EnableCursor();       // for the title screen
 
     // Respawn at whichever spawn is farther from the enemies
     auto respawnPlayer = [&]() {
@@ -79,28 +99,39 @@ int main() {
         player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
     };
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose() && !quit) {
         float dt = GetFrameTime();
 
-        // ---------- Update ----------
-        // Tab toggles mouse capture so you can click out of the window
-        if (IsKeyPressed(KEY_TAB)) {
-            paused = !paused;
-            if (paused) EnableCursor(); else DisableCursor();
+        // ---------- Menus ----------
+        if (IsKeyPressed(KEY_F3)) showFps = !showFps;
+        if (!started) {
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { started = true; DisableCursor(); inputGrace = 2; }
+        } else {
+            if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_TAB)) {
+                paused = !paused;
+                if (paused) EnableCursor(); else DisableCursor();
+            }
         }
+        bool playing = started && !paused;
+        if (inputGrace > 0 && playing) inputGrace--;
 
         // Enter respawns at the next spawn point (the other end of the arena)
-        if (!paused && player.IsAlive() && IsKeyPressed(KEY_ENTER)) {
+        if (playing && player.IsAlive() && IsKeyPressed(KEY_ENTER)) {
             currentSpawn = (currentSpawn + 1) % (int)spawns.size();
             player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
         }
 
-        if (!paused) {
+        // ---------- Update ----------
+        if (playing) {
             if (player.IsAlive()) {
                 player.Update(dt, world);
                 bool wasReloading = gun.IsReloading();
-                if (gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance())) {
+                bool fired = inputGrace > 0 ? (gun.Tick(dt, player.GetStance()), false)
+                                            : gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance());
+                if (fired) {
                     audio.PlayGunshot(0.8f, 0.0f);
+                    punchPitch += Lerp(2.4f, 1.1f, gun.GetAimAmount());
+                    punchYaw += GetRandomValue(-100, 100) / 100.0f * 0.5f;
                     // Effects: a tracer from roughly where the gun is, then whatever it hit
                     const ShotResult& shot = gun.LastShot();
                     const Camera3D& c = player.GetCamera();
@@ -111,6 +142,11 @@ int main() {
                     Fx::Tracer(gunTip, end, { 255, 220, 160, 140 });
                     if (shot.hitEnemy) Fx::Blood(shot.point, shot.direction, shot.headshot);
                     else if (shot.hit) Fx::Impact(shot.point, shot.normal, shot.surface);
+                    if (shot.killed) {
+                        killBanner = 1.6f;
+                        killBannerHeadshot = shot.headshot;
+                        addFeed(shot.headshot ? "RIVAL ELIMINATED  -  HEADSHOT" : "RIVAL ELIMINATED", { 255, 214, 92, 255 });
+                    }
                 }
                 if (!wasReloading && gun.IsReloading()) audio.PlayReload();
                 player.SetZoom(gun.GetAimAmount());
@@ -139,28 +175,58 @@ int main() {
                     Fx::Tracer(e.GetMuzzle(), t.end, { 255, 210, 140, 255 });
                     if (t.hitWorld) Fx::Impact(t.end, t.normal, t.surface);
                     if (t.hitPlayer && player.IsAlive()) {
-                        damageFlash = t.headshot ? 0.6f : 0.4f;
+                        hurt = 1.0f;
+                        shake = t.headshot ? 1.0f : 0.6f;
+                        // Which way the shot came from, relative to the way the player faces
+                        Vector3 from = Vector3Subtract(e.GetMuzzle(), player.GetFeet());
+                        Vector3 fwd = player.GetLookDirection();
+                        fwd.y = 0;
+                        fwd = Vector3Normalize(fwd);
+                        float angle = atan2f(Vector3DotProduct(from, player.GetRight()), Vector3DotProduct(from, fwd));
+                        damageMarkers.push_back({ angle, 1.4f });
                         if (player.TakeDamage(t.headshot ? REVOLVER.headDamage : REVOLVER.bodyDamage)) {
                             deaths++;
                             deathTimer = 2.5f;
                             player.SetZoom(0.0f);
                             audio.StopReload();
+                            addFeed(t.headshot ? "YOU WERE ELIMINATED  -  HEADSHOT" : "YOU WERE ELIMINATED", { 232, 72, 58, 255 });
                         }
                     }
                 }
             }
             Fx::Update(dt);
-            damageFlash = std::max(0.0f, damageFlash - dt);
+            hurt = std::max(0.0f, hurt - dt * 1.2f);
+            shake = std::max(0.0f, shake - dt * 3.0f);
+            killBanner = std::max(0.0f, killBanner - dt);
+            punchPitch -= punchPitch * std::min(1.0f, dt * 11.0f);
+            punchYaw -= punchYaw * std::min(1.0f, dt * 11.0f);
+            for (Hud::DamageMarker& d : damageMarkers) d.life -= dt;
+            damageMarkers.erase(std::remove_if(damageMarkers.begin(), damageMarkers.end(), [](const Hud::DamageMarker& d) { return d.life <= 0; }),
+                                damageMarkers.end());
+            for (Hud::FeedEntry& f : feed) f.life -= dt;
+            feed.erase(std::remove_if(feed.begin(), feed.end(), [](const Hud::FeedEntry& f) { return f.life <= 0; }), feed.end());
         }
         for (WorldBox& b : world) b.hitFlash = std::max(0.0f, b.hitFlash - dt);
-        audio.UpdateFootsteps(player.GetStance(), player.IsAlive() && !paused);
+        audio.UpdateFootsteps(player.GetStance(), player.IsAlive() && playing);
 
         // ---------- Draw ----------
-        const Camera3D& cam = player.GetCamera();
+        // The camera we render from: the player's, plus the visual kick and shake
+        Camera3D cam = player.GetCamera();
+        {
+            Vector3 f = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+            Vector3 r = Vector3Normalize(Vector3CrossProduct(f, { 0, 1, 0 }));
+            f = Vector3RotateByAxisAngle(f, r, punchPitch * DEG2RAD);
+            f = Vector3RotateByAxisAngle(f, { 0, 1, 0 }, -punchYaw * DEG2RAD);
+            if (shake > 0.0f) {
+                float k = shake * shake * 0.025f;
+                cam.position = Vector3Add(cam.position, { GetRandomValue(-100, 100) / 100.0f * k, GetRandomValue(-100, 100) / 100.0f * k, 0 });
+            }
+            cam.target = Vector3Add(cam.position, f);
+        }
 
-        // Your own body (no head or arms: the camera is in the head and the
-        // first-person arms are drawn with the gun), so you see your legs when you
-        // look down. The whole body still casts a shadow.
+        // The player's own body (no head or arms: the camera is in the head and the
+        // first-person arms are drawn with the gun), so the legs show when looking
+        // down. The whole body still casts a shadow.
         auto drawPlayerBody = [&](int parts) {
             if (player.IsAlive() && character.loaded) {
                 CharAnim anim = CharAnim::Idle;
@@ -174,7 +240,7 @@ int main() {
                 Vector3 look = player.GetLookDirection();
                 float yaw = atan2f(look.x, look.z);
                 // The model's eyes are 14 cm in front of its feet; shift it back so they
-                // sit under the camera, plus a little more so you don't see inside the collar
+                // sit under the camera, plus a little more to stay out of the collar
                 Vector3 f = { sinf(yaw), 0, cosf(yaw) };
                 Vector3 at = Vector3Subtract(player.GetFeet(), Vector3Scale(f, 0.18f));
                 Matrix toWorld = MatrixMultiply(MatrixRotateY(yaw), MatrixTranslate(at.x, at.y, at.z));
@@ -221,8 +287,8 @@ int main() {
         Render::EndWorldPass();
 
         // 3. First-person weapon: its own pass on top of the world, lit like the
-        //    spot you're standing in (darker in shadow)
-        if (player.IsAlive()) {
+        //    spot the player stands in (darker in shadow)
+        if (player.IsAlive() && started) {
             sunOnGun += ((Render::SunVisible(cam.position, world) ? 1.0f : 0.0f) - sunOnGun) * (1.0f - expf(-8.0f * dt));
             Render::SetViewModelLighting(cam, sunOnGun);
             Render::SetFlashLight(0, { 0.15f, -0.08f, -0.9f }, { 7.0f, 4.5f, 1.8f }, gun.IsMuzzleFlashing() ? 1.5f : 0.0f);
@@ -230,45 +296,52 @@ int main() {
             viewModel.Draw(gun);
         }
 
-        // Enemy health bars, drawn in screen space above their heads
+        // Enemy health: a slim bar over the head once it has been hurt
         for (const Enemy& e : enemies) {
-            if (!e.IsAlive()) continue;
-            Vector3 top = Vector3Add(e.GetFeet(), { 0, e.GetHeight() + 0.35f, 0 });
-            Vector3 toTop = Vector3Subtract(top, cam.position);
-            if (Vector3DotProduct(toTop, player.GetLookDirection()) <= 0.0f) continue; // behind us
+            if (!e.IsAlive() || e.GetHealth() >= e.GetMaxHealth() || !started) continue;
+            Vector3 top = Vector3Add(e.GetFeet(), { 0, e.GetHeight() + 0.3f, 0 });
+            if (Vector3DotProduct(Vector3Subtract(top, cam.position), player.GetLookDirection()) <= 0.0f) continue; // behind
             if (!HasLineOfSight(cam.position, top, world)) continue;
             Vector2 s = GetWorldToScreen(top, cam);
-            const int bw = 50, bh = 6;
-            int filled = bw * e.GetHealth() / e.GetMaxHealth();
-            DrawRectangle((int)s.x - bw / 2 - 1, (int)s.y - 1, bw + 2, bh + 2, BLACK);
-            DrawRectangle((int)s.x - bw / 2, (int)s.y, filled, bh, { 80, 220, 90, 255 });
+            const float bw = 54, bh = 5;
+            DrawRectangleRec({ s.x - bw / 2 - 1, s.y - 1, bw + 2, bh + 2 }, { 0, 0, 0, 160 });
+            DrawRectangleRec({ s.x - bw / 2, s.y, bw * e.GetHealth() / e.GetMaxHealth(), bh }, { 232, 72, 58, 255 });
         }
 
-        // Red tint when hit
-        if (damageFlash > 0.0f) DrawRectangle(0, 0, SCREEN_W, SCREEN_H, Fade(RED, std::min(0.45f, damageFlash)));
-
-        if (player.IsAlive()) {
-            gun.DrawHUD(SCREEN_W, SCREEN_H, player.GetCamera().fovy);
-        } else {
-            DrawRectangle(0, 0, SCREEN_W, SCREEN_H, Fade(BLACK, 0.5f));
-            const char* msg = "YOU DIED";
-            DrawText(msg, SCREEN_W / 2 - MeasureText(msg, 60) / 2, SCREEN_H / 2 - 40, 60, RED);
-            const char* sub = TextFormat("Respawning in %.1f", std::max(0.0f, deathTimer));
-            DrawText(sub, SCREEN_W / 2 - MeasureText(sub, 22) / 2, SCREEN_H / 2 + 30, 22, RAYWHITE);
+        // 4. HUD and menus
+        Hud::State hs;
+        hs.screenW = SCREEN_W;
+        hs.screenH = SCREEN_H;
+        hs.health = player.GetHealth();
+        hs.maxHealth = player.GetMaxHealth();
+        hs.alive = player.IsAlive();
+        hs.deathTimer = deathTimer;
+        hs.hurt = hurt;
+        hs.ammo = gun.GetAmmo();
+        hs.magazine = gun.GetDef().magazineSize;
+        hs.reloading = gun.IsReloading();
+        hs.reloadProgress = gun.GetReloadProgress();
+        hs.spreadPx = tanf(gun.GetSpread() * DEG2RAD) / tanf(player.GetCamera().fovy * 0.5f * DEG2RAD) * (SCREEN_H * 0.5f);
+        hs.recoil = gun.GetRecoil();
+        hs.aim = gun.GetAimAmount();
+        hs.hitMarker = gun.GetHitMarker();
+        hs.hitKilled = gun.LastHitKilled();
+        hs.hitHeadshot = gun.LastHitHeadshot();
+        hs.killBanner = killBanner;
+        hs.killBannerHeadshot = killBannerHeadshot;
+        hs.kills = gun.GetKills();
+        hs.deaths = deaths;
+        hs.damage = &damageMarkers;
+        hs.feed = &feed;
+        hs.started = started;
+        hs.paused = paused;
+        hs.showFps = showFps;
+        Hud::Draw(hs);
+        if (paused) {
+            int click = Hud::PauseMenuClick(hs);
+            if (click == 1) { paused = false; DisableCursor(); inputGrace = 2; }
+            if (click == 2) quit = true;
         }
-
-        // Health and score
-        int hp = player.GetHealth();
-        Color hpColor = hp > 50 ? RAYWHITE : (hp > 25 ? ORANGE : RED);
-        DrawText(TextFormat("HP %d", hp), 20, SCREEN_H - 50, 30, hpColor);
-        DrawRectangle(20, SCREEN_H - 16, 150, 6, Fade(BLACK, 0.6f));
-        DrawRectangle(20, SCREEN_H - 16, 150 * hp / player.GetMaxHealth(), 6, hpColor);
-        DrawText(TextFormat("Deaths: %d", deaths), SCREEN_W - 260, 14, 20, RAYWHITE);
-
-        DrawFPS(10, 10);
-        DrawText("WASD move | Space jump | Shift sprint | Ctrl/C crouch | Q/E lean | LMB shoot | RMB aim | R reload | Enter respawn | Tab release mouse | Esc quit",
-                 10, 36, 18, RAYWHITE);
-        if (paused) DrawText("PAUSED - press Tab to resume", SCREEN_W / 2 - 180, SCREEN_H / 2 - 60, 24, YELLOW);
 
         EndDrawing();
     }
@@ -280,6 +353,7 @@ int main() {
     UnloadModel(spawnPad);
     Render::Shutdown();
     Fx::Shutdown();
+    Hud::Shutdown();
     UnloadGroundModel(ground);
     UnloadWeaponModelAssets();
     UnloadWorldMaterials(materials);

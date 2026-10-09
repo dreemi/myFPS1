@@ -96,6 +96,7 @@ void Enemy::SpawnAt(Vector3 position) {
     alive = true;
     health = maxHealth;
     hitFlash = 0.0f;
+    hitReact = 0.0f;
     muzzleFlash = 0.0f;
     alertTimer = 0.0f;
     decisionTimer = 0.0f;
@@ -152,6 +153,9 @@ bool Enemy::TakeHit(Vector3 shooterPosition, int damage) {
     if (!alive) return false;
     health -= damage;
     hitFlash = 0.15f;
+    hitReact = HIT_REACT_TIME;
+    Vector3 away = { feet.x - shooterPosition.x, 0.0f, feet.z - shooterPosition.z };
+    if (Vector3Length(away) > 0.01f) recoilDir = Vector3Normalize(away);
     // Getting shot tells it where the player is; if it wasn't already
     // fighting, it picks a firing position straight away
     alertTimer = alertMemory;
@@ -311,6 +315,7 @@ void Enemy::Update(float dt, const EnemyTarget& target, const World& world) {
         return;
     }
     hitFlash = fmaxf(0.0f, hitFlash - dt);
+    hitReact = fmaxf(0.0f, hitReact - dt);
     muzzleFlash = fmaxf(0.0f, muzzleFlash - dt);
     stateTimer += dt;
 
@@ -382,15 +387,29 @@ CharAnim Enemy::GetAnim() const {
 // --- Drawing --------------------------------------------------------------
 
 void Enemy::Draw(CharacterAssets* character) const {
-    if (!alive) return;
     float yawDeg = atan2f(faceDir.x, faceDir.z) * RAD2DEG;
+    if (!alive && !(character && character->loaded)) return;
 
     if (character && character->loaded) {
-        // The character model, turned to face where it's looking
-        CharAnim anim = GetAnim();
+        // Tip over away from the last shot: a quick flinch when hit, a fall when killed
+        Vector3 axis = Vector3CrossProduct({ 0, 1, 0 }, recoilDir);
+        float tilt = 0.0f, sink = 0.0f;
+        if (alive) {
+            tilt = 9.0f * (hitReact / HIT_REACT_TIME);
+        } else {
+            float t = respawnDelay - respawnTimer;       // seconds since death
+            float fall = fminf(1.0f, t / 0.55f);
+            tilt = 86.0f * fall * fall;                  // accelerate into the ground
+            if (t > 0.55f && t < 0.75f) tilt -= 6.0f * sinf((t - 0.55f) / 0.2f * PI); // small bounce
+            sink = t > 2.2f ? (t - 2.2f) * 0.6f : 0.0f;  // then sink away before respawning
+        }
+        CharAnim anim = alive ? GetAnim() : CharAnim::Idle;
         int frame = CharacterFrame(*character, anim, animPhase);
-        Matrix toWorld = MatrixMultiply(MatrixRotateY(yawDeg * DEG2RAD), MatrixTranslate(feet.x, feet.y, feet.z));
-        DrawCharacter(*character, anim, frame, toWorld, PART_ALL, hitFlash > 0.0f ? RED : WHITE);
+        Matrix toWorld = MatrixRotateY(yawDeg * DEG2RAD);
+        if (tilt != 0.0f && Vector3LengthSqr(axis) > 1e-6f) toWorld = MatrixMultiply(toWorld, MatrixRotate(Vector3Normalize(axis), tilt * DEG2RAD));
+        toWorld = MatrixMultiply(toWorld, MatrixTranslate(feet.x, feet.y - sink, feet.z));
+        DrawCharacter(*character, anim, frame, toWorld, PART_ALL, hitFlash > 0.0f ? Color{ 255, 150, 150, 255 } : WHITE);
+        if (!alive) return; // dropped the gun
 
         // The revolver's world model in its right hand (gun origin sits just above the palm)
         Vector3 palm = Vector3Transform(CharacterGripPoint(*character, anim, frame), toWorld);

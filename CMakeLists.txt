@@ -30,6 +30,7 @@ add_executable(fps
     src/character.cpp
     src/render.cpp
     src/effects.cpp
+    src/hud.cpp
 )
 target_link_libraries(fps PRIVATE raylib)
 

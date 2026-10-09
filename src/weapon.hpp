@@ -75,8 +75,10 @@ public:
     float GetRecoil() const { return recoil; }            // 1 right after a shot, decays to 0
     bool IsMuzzleFlashing() const { return muzzleFlash > 0.0f; }
     int GetKills() const { return kills; }
-
-    void DrawHUD(int screenW, int screenH, float fovy) const; // crosshair, hit marker, ammo, kills
+    // Hit feedback for the HUD: seconds left on the hit marker, and what the last hit was
+    float GetHitMarker() const { return hitMarker; }
+    bool LastHitKilled() const { return lastHitKilled; }
+    bool LastHitHeadshot() const { return lastHitHeadshot; }
 
 private:
     const WeaponDef* def;
