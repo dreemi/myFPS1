@@ -1,5 +1,6 @@
 #include "soldier.hpp"
 #include "weapon_models.hpp"
+#include "helmet.hpp"
 #include "raymath.h"
 #include "rlgl.h"
 
@@ -64,11 +65,22 @@ Vector3 SoldierMuzzle(const CharacterAssets* character, const SoldierView& s) {
     return Vector3Transform(ModelsOf(s).worldMuzzle, SoldierGunTransform(character, s));
 }
 
+Matrix SoldierHelmetTransform(const CharacterAssets* character, const SoldierView& s) {
+    if (character && character->loaded) {
+        CharAnim anim = s.alive ? s.anim : CharAnim::Rest;
+        int frame = CharacterFrame(*character, anim, s.animPhase);
+        return MatrixMultiply(MatrixMultiply(HelmetOnHead(*character, anim, frame), character->model.transform), BodyTransform(s));
+    }
+    Vector3 head = Vector3Add(s.feet, { 0, s.eyeHeight + 0.1f, 0 });
+    return MatrixMultiply(MatrixRotateY(s.yaw), MatrixTranslate(head.x, head.y, head.z));
+}
+
 void DrawSoldier(CharacterAssets* character, const SoldierView& s) {
     if (character && character->loaded) {
         CharAnim anim = s.alive ? s.anim : CharAnim::Rest; // a body lets go of the gun
         int frame = CharacterFrame(*character, anim, s.animPhase);
         DrawCharacter(*character, anim, frame, BodyTransform(s), PART_ALL, s.hitFlash > 0.0f ? Color{ 255, 150, 150, 255 } : WHITE);
+        if (s.helmet) DrawHelmet(SoldierHelmetTransform(character, s));
         if (!s.alive) return; // dropped the gun
         rlPushMatrix();
             rlMultMatrixf(MatrixToFloat(SoldierGunTransform(character, s)));
@@ -82,6 +94,7 @@ void DrawSoldier(CharacterAssets* character, const SoldierView& s) {
     float h = s.crouching ? 1.2f : 1.8f;
     DrawCubeV(Vector3Add(s.feet, { 0, h * 0.4f, 0 }), { 0.5f, h * 0.8f, 0.5f }, body);
     DrawSphere(Vector3Add(s.feet, { 0, s.eyeHeight, 0 }), 0.15f, s.hitFlash > 0.0f ? RED : Color{ 230, 200, 180, 255 });
+    if (s.helmet) DrawHelmet(SoldierHelmetTransform(character, s));
     rlPushMatrix();
         rlMultMatrixf(MatrixToFloat(SoldierGunTransform(character, s)));
         ModelsOf(s).drawWorld(s.muzzleFlash);

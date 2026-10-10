@@ -30,6 +30,7 @@ struct SimPlayer {
     Vector3 fallDir = { 0, 0, -1 };
     float hitFlash = 0.0f, hitReact = 0.0f;
     float animPhase = 0.0f;    // stride cycles (third-person animation)
+    bool helmet = true;        // stops one shot to the back of the head
     int ping = 0;
 
     // Host bookkeeping for a remote player's commands
@@ -67,6 +68,9 @@ public:
     const std::vector<std::unique_ptr<SimPlayer>>& Players() const { return players; }
     std::vector<Enemy>& Bots() { return bots; }
     const std::vector<Enemy>& Bots() const { return bots; }
+    SoldierView BotView(int index) const;          // with its id (BOT_ID_BASE + index) and helmet
+    int BotKills(int index) const { return botKills[index]; }
+    int BotDeaths(int index) const { return botDeaths[index]; }
 
     // A remote player's command: checked and queued, run on the next Update
     void QueueCommand(uint8_t id, const PlayerCommand& cmd);
@@ -101,6 +105,8 @@ private:
     void ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTime);
     void UpdateBots(float dt);
     void ResolveBotShot(int shooter, Ray shot);
+    // A head hit from behind on a helmet: it pops off and the shot does nothing (true)
+    bool HelmetDeflects(bool& helmet, Vector3 facing, Vector3 head, Ray shot, uint8_t actor, uint8_t target);
     void KillPlayer(SimPlayer& victim, uint8_t killer, int weapon, bool headshot, Vector3 from);
     void RespawnPlayer(SimPlayer& p);
     Hitbox CurrentHitbox(const SimPlayer& p) const;
@@ -112,12 +118,17 @@ private:
     std::vector<std::unique_ptr<SimPlayer>> players;
     std::vector<Enemy> bots;
     std::vector<uint8_t> botTarget;  // who each bot is fighting (a player id or BOT_ID_BASE + index)
+    std::vector<bool> botHelmet, botWasAlive;
+    std::vector<int> botKills, botDeaths;
     std::deque<HistoryFrame> history;
     std::vector<GameEvent> events;
     std::vector<SpawnPoint> spawns;
     float time = 0.0f;
     unsigned seed;
 };
+
+// True if a bullet travelling along `shotDir` enters the back of a head facing `facing`
+bool ShotFromBehind(Vector3 shotDir, Vector3 facing);
 
 // Hitboxes of a player for bullets: a body box on the feet and a head sphere at the eyes
 bool RayHitsPlayer(Ray ray, Vector3 feet, Vector3 eye, float bodyTop, float* distance, bool* headshot);

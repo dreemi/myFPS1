@@ -30,6 +30,8 @@ void GunSmoke(Vector3 muzzle, Vector3 dir, float amount);
 // kind is the caller's (what to draw); restHeight = its centre's height lying on the ground;
 // flat = comes to rest on its broad side (a magazine) rather than rolling on its axis (a case)
 void Casing(Vector3 position, Vector3 velocity, int kind, float restHeight = 0.0055f, bool flat = false);
+// Something bigger knocked flying (a helmet): starts in `rotation`, tumbles slowly, settles upright
+void Tumble(Vector3 position, Vector3 velocity, Matrix rotation, int kind, float restHeight);
 // Draws them with the given cartridge drawer (origin at the rim, bullet along -Z); in the world pass
 void DrawCasings(void (*draw)(Matrix transform, int kind));
 // Where cases hit the ground since the last call, and how hard (0..1), for sounds

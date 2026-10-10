@@ -169,6 +169,102 @@ int main() {
         CHECK(std::isfinite(b->body.GetFeet().x) && moved < 0.5f, "NaN and oversized commands do no harm (moved %.2f m)", moved);
     }
 
+    std::printf("Helmets\n");
+    {
+        CHECK(ShotFromBehind({ 0, 0, 1 }, { 0, 0, 1 }), "a shot travelling the way the head faces comes from behind");
+        CHECK(!ShotFromBehind({ 0, 0, -1 }, { 0, 0, 1 }) && !ShotFromBehind({ 1, 0, 0 }, { 0, 0, 1 }),
+              "from the front or the side it doesn't");
+
+        GameSim sim(world, 0, 5);
+        SimPlayer* a = sim.AddPlayer("A");
+        SimPlayer* b = sim.AddPlayer("B");
+        // Faces a player along a direction (searching the controller's own yaw convention)
+        auto face = [](SimPlayer* p, Vector3 dir) {
+            PlayerState st = p->body.GetState();
+            float bestYaw = 0, best = -2;
+            for (int k = 0; k < 720; k++) {
+                st.yaw = k * (2 * PI / 720);
+                st.pitch = 0;
+                p->body.SetState(st);
+                float d = Vector3DotProduct(p->body.GetLookDirection(), dir);
+                if (d > best) { best = d; bestYaw = st.yaw; }
+            }
+            st.yaw = bestYaw;
+            p->body.SetState(st);
+        };
+        auto place = [&](Vector3 at, SimPlayer* p) {
+            PlayerState st = p->body.GetState();
+            st.feet = at;
+            p->body.SetState(st);
+        };
+        uint32_t seq = 1;
+        // One aimed shot from A at B's head; returns the events
+        auto shootHead = [&]() {
+            float yaw, pitch;
+            LookAt(*a, b->body.GetCamera().position, yaw, pitch);
+            for (int k = 0; k < 40; k++) { sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, BTN_AIM)); sim.Update(DT); }
+            sim.TakeEvents();
+            sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, BTN_AIM | BTN_FIRE | BTN_FIRE_PRESSED, sim.Time()));
+            sim.Update(DT);
+            std::vector<GameEvent> ev = sim.TakeEvents();
+            for (int k = 0; k < 30; k++) { sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, BTN_AIM)); sim.Update(DT); }
+            return ev;
+        };
+        auto has = [](const std::vector<GameEvent>& ev, EventType t) {
+            for (const GameEvent& e : ev) if (e.type == t) return true;
+            return false;
+        };
+
+        // From behind: the helmet pops off, B is unhurt; the next one is a normal headshot
+        place({ 0, 0, -6 }, a);
+        place({ 0, 0, -3 }, b);
+        face(b, { 0, 0, 1 });
+        sim.Update(DT);
+        std::vector<GameEvent> ev = shootHead();
+        bool deflected = false;
+        for (const GameEvent& e : ev) if (e.type == EventType::Shot && e.Is(EVENT_DEFLECTED)) deflected = true;
+        CHECK(deflected && has(ev, EventType::HelmetOff), "a shot to the back of the head knocks the helmet off");
+        CHECK(b->Alive() && b->body.GetHealth() == b->body.GetMaxHealth() && !b->helmet, "and the wearer is unhurt, now bareheaded");
+        ev = shootHead();
+        CHECK(!b->Alive() && has(ev, EventType::Killed), "the next shot to the head is a normal headshot");
+        for (int k = 0; k < 400 && !b->Alive(); k++) sim.Update(DT);
+        CHECK(b->Alive() && b->helmet, "a respawn comes with a new helmet");
+
+        // From the front: pierced, a normal headshot, and it stays on
+        place({ 0, 0, -6 }, a);
+        place({ 0, 0, -3 }, b);
+        face(b, { 0, 0, -1 });
+        sim.Update(DT);
+        ev = shootHead();
+        CHECK(!has(ev, EventType::HelmetOff) && !b->Alive(), "from the front the helmet is pierced: a normal headshot");
+
+        // A bot's helmet works the same way
+        GameSim botSim(world, 1, 9);
+        CHECK(botSim.BotView(0).helmet && botSim.BotView(0).id == BOT_ID_BASE, "bots wear helmets too");
+    }
+
+    std::printf("Bots on the scoreboard\n");
+    {
+        Proto::Snapshot snap;
+        SoldierView v;
+        v.id = 0;
+        v.helmet = false;
+        snap.bots.push_back(v);
+        snap.botScores.push_back({ 4, 2 });
+        Proto::Snapshot back;
+        bool ok = Proto::DecodeSnapshot(Proto::EncodeSnapshot(snap), back);
+        CHECK(ok && back.botScores.size() == 1 && back.botScores[0].kills == 4 && back.botScores[0].deaths == 2,
+              "bot scores travel in snapshots");
+        CHECK(ok && !back.bots[0].helmet, "and so do helmets");
+
+        SessionConfig oc;
+        oc.bots = 2;
+        Session offline(SessionMode::Offline, world, oc);
+        int botRows = 0;
+        for (const ScoreRow& r : offline.Scoreboard()) if (r.bot) botRows++;
+        CHECK(botRows == 2, "the scoreboard lists the bots (%d)", botRows);
+    }
+
     std::printf("Bots fight each other\n");
     {
         GameSim sim(world, 2, 3); // no players: the bots only have each other

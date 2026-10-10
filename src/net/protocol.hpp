@@ -13,7 +13,7 @@
 // presentation-only values are quantized.
 namespace Proto {
 
-constexpr uint16_t VERSION = 1;
+constexpr uint16_t VERSION = 2;
 
 enum MsgType : uint8_t {
     MSG_HELLO = 1,    // client -> host: version, name
@@ -69,6 +69,7 @@ struct OwnState {
     uint8_t current = 0, wanted = 0;
     float holster = 0.0f;
     float respawnTimer = 0.0f;
+    bool helmet = true;
 };
 
 struct Snapshot {
@@ -81,6 +82,8 @@ struct Snapshot {
     };
     std::vector<PlayerEntry> players;
     std::vector<SoldierView> bots;
+    struct BotScore { int kills = 0, deaths = 0; };
+    std::vector<BotScore> botScores;   // one per bot, for the scoreboard
 };
 
 struct Hello { uint16_t version = VERSION; std::string name; };

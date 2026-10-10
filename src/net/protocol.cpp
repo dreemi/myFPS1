@@ -180,12 +180,13 @@ bool DecodeInput(const std::vector<uint8_t>& msg, std::vector<PlayerCommand>& ou
 // --- Snapshot ---------------------------------------------------------------------------
 
 enum SoldierFlag : uint8_t {
-    SF_ALIVE = 1, SF_CROUCH = 2, SF_GROUNDED = 4, SF_RELOADING = 8, SF_MUZZLE = 16, SF_RIFLE = 32,
+    SF_ALIVE = 1, SF_CROUCH = 2, SF_GROUNDED = 4, SF_RELOADING = 8, SF_MUZZLE = 16, SF_RIFLE = 32, SF_HELMET = 64,
 };
 
 static void WriteSoldier(Writer& w, const SoldierView& v) {
     uint8_t f = (v.alive ? SF_ALIVE : 0) | (v.crouching ? SF_CROUCH : 0) | (v.grounded ? SF_GROUNDED : 0) |
-                (v.reloading ? SF_RELOADING : 0) | (v.muzzleFlash ? SF_MUZZLE : 0) | (v.weapon == WEAPON_RIFLE ? SF_RIFLE : 0);
+                (v.reloading ? SF_RELOADING : 0) | (v.muzzleFlash ? SF_MUZZLE : 0) | (v.weapon == WEAPON_RIFLE ? SF_RIFLE : 0) |
+                (v.helmet ? SF_HELMET : 0);
     w.U8(v.id);
     w.U8(f);
     w.Vec3(v.feet);
@@ -212,6 +213,7 @@ static SoldierView ReadSoldier(Reader& r, bool bot) {
     v.reloading = f & SF_RELOADING;
     v.muzzleFlash = f & SF_MUZZLE;
     v.weapon = (f & SF_RIFLE) ? WEAPON_RIFLE : WEAPON_REVOLVER;
+    v.helmet = f & SF_HELMET;
     v.feet = r.Vec3();
     v.yaw = r.Angle();
     v.pitch = r.Angle();
@@ -252,6 +254,7 @@ static void WriteOwn(Writer& w, const OwnState& o) {
     w.U8(o.wanted);
     w.F32(o.holster);
     w.F32(o.respawnTimer);
+    w.U8(o.helmet ? 1 : 0);
 }
 
 static void ReadOwn(Reader& r, OwnState& o) {
@@ -281,6 +284,7 @@ static void ReadOwn(Reader& r, OwnState& o) {
     o.wanted = r.U8() == WEAPON_REVOLVER ? WEAPON_REVOLVER : WEAPON_RIFLE;
     o.holster = r.F32();
     o.respawnTimer = r.F32();
+    o.helmet = r.U8() != 0;
 }
 
 std::vector<uint8_t> EncodeSnapshot(const Snapshot& s) {
@@ -298,6 +302,11 @@ std::vector<uint8_t> EncodeSnapshot(const Snapshot& s) {
     }
     w.U8((uint8_t)s.bots.size());
     for (const SoldierView& b : s.bots) WriteSoldier(w, b);
+    for (size_t i = 0; i < s.bots.size(); i++) {
+        Snapshot::BotScore sc = i < s.botScores.size() ? s.botScores[i] : Snapshot::BotScore{};
+        w.I16((int16_t)sc.kills);
+        w.I16((int16_t)sc.deaths);
+    }
     return w.data;
 }
 
@@ -320,6 +329,12 @@ bool DecodeSnapshot(const std::vector<uint8_t>& msg, Snapshot& out) {
     }
     int b = r.U8();
     for (int i = 0; i < b && r.ok; i++) out.bots.push_back(ReadSoldier(r, true));
+    for (int i = 0; i < b && r.ok; i++) {
+        Snapshot::BotScore sc;
+        sc.kills = r.I16();
+        sc.deaths = r.I16();
+        out.botScores.push_back(sc);
+    }
     return r.ok;
 }
 
@@ -353,7 +368,7 @@ bool DecodeEvents(const std::vector<uint8_t>& msg, std::vector<GameEvent>& out) 
     for (int i = 0; i < n && r.ok; i++) {
         GameEvent e;
         uint8_t type = r.U8();
-        if (type > (uint8_t)EventType::Respawned) return false;
+        if (type > (uint8_t)EventType::HelmetOff) return false;
         e.type = (EventType)type;
         e.actor = r.U8();
         e.target = r.U8();

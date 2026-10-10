@@ -31,6 +31,7 @@ struct CharacterAssets {
     Vector3 fpRifleGrip{};       // right palm centre in the first-person rifle hold
     std::vector<Vector3> leftPalm[(int)CharAnim::Count]; // left palm centre per Blender frame (fp_hold, fp_rifle)
     int handBone = -1;           // hand_r
+    int headBone = -1;           // head (helmets ride on it)
     bool loaded = false;
 };
 
@@ -50,6 +51,9 @@ void DrawCharacter(CharacterAssets& c, CharAnim anim, int frame, Matrix transfor
 Vector3 CharacterGripPoint(const CharacterAssets& c, CharAnim anim, int frame);
 // Model-space transform of the right hand bone in that frame
 Matrix CharacterHandTransform(const CharacterAssets& c, CharAnim anim, int frame);
+// How the head has moved from the bind pose in that frame (model space): bind-pose
+// model space -> posed model space, for things worn on the head
+Matrix CharacterHeadMotion(const CharacterAssets& c, CharAnim anim, int frame);
 
 // fp_hold's frames, as authored in Blender (tools/export_character.py)
 const float FP_RELOAD_FIRST = 1.0f, FP_RELOAD_LAST = 90.0f;  // the revolver's reload

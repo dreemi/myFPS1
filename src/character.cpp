@@ -20,6 +20,7 @@ bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
             if (strcmp(c.anims[a].name, ANIM_NAMES[k]) == 0) c.animIndex[k] = a;
     for (int i = 0; i < c.model.boneCount; i++)
         if (strcmp(c.model.bones[i].name, "hand_r") == 0) c.handBone = i;
+        else if (strcmp(c.model.bones[i].name, "head") == 0) c.headBone = i;
 
     // character.txt: which mesh is which part, and the grip points
     c.meshPart.assign(c.model.meshCount, PART_LEGS);
@@ -108,6 +109,18 @@ Matrix CharacterHandTransform(const CharacterAssets& c, CharAnim anim, int frame
     const Transform& t = a.framePoses[frame][c.handBone];
     return MatrixMultiply(MatrixMultiply(MatrixScale(t.scale.x, t.scale.y, t.scale.z), QuaternionToMatrix(t.rotation)),
                           MatrixTranslate(t.translation.x, t.translation.y, t.translation.z));
+}
+
+static Matrix TransformMatrix(const Transform& t) {
+    return MatrixMultiply(MatrixMultiply(MatrixScale(t.scale.x, t.scale.y, t.scale.z), QuaternionToMatrix(t.rotation)),
+                          MatrixTranslate(t.translation.x, t.translation.y, t.translation.z));
+}
+
+Matrix CharacterHeadMotion(const CharacterAssets& c, CharAnim anim, int frame) {
+    if (!c.loaded || c.headBone < 0) return MatrixIdentity();
+    const ModelAnimation& a = c.anims[c.animIndex[(int)anim]];
+    frame = Clamp(frame, 0, a.frameCount - 1);
+    return MatrixMultiply(MatrixInvert(TransformMatrix(c.model.bindPose[c.headBone])), TransformMatrix(a.framePoses[frame][c.headBone]));
 }
 
 Vector3 CharacterFpLeftPalm(const CharacterAssets& c, CharAnim anim, float blenderFrame) {

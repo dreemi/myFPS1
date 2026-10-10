@@ -47,6 +47,7 @@ struct Brass {
     int kind;
     float restHeight;
     bool flat, resting;
+    bool upright = false; // settles the right way up (yaw only)
 };
 static std::vector<Brass> brass;
 static std::vector<CasingBounce> bounces;
@@ -283,6 +284,24 @@ void Casing(Vector3 position, Vector3 velocity, int kind, float restHeight, bool
     brass.push_back(b);
 }
 
+void Tumble(Vector3 position, Vector3 velocity, Matrix rotation, int kind, float restHeight) {
+    if (!ready) return;
+    if (brass.size() >= MAX_BRASS) brass.erase(brass.begin());
+    Brass b;
+    b.pos = position;
+    b.vel = velocity;
+    b.rot = rotation;
+    b.spinAxis = Vector3Normalize(Vector3Add(RandUnit(), { 0, 0, 0.001f }));
+    b.spinRate = Rand(5.0f, 9.0f);
+    b.life = 0.0f;
+    b.kind = kind;
+    b.restHeight = restHeight;
+    b.flat = false;
+    b.resting = false;
+    b.upright = true;
+    brass.push_back(b);
+}
+
 void DrawCasings(void (*draw)(Matrix, int)) {
     for (const Brass& b : brass) draw(MatrixMultiply(b.rot, MatrixTranslate(b.pos.x, b.pos.y, b.pos.z)), b.kind);
 }
@@ -336,7 +355,7 @@ static void UpdateBrass(float dt) {
                 axis = Vector3Normalize(axis);
                 float yaw = atan2f(axis.x, axis.z);
                 float roll = b.flat ? (Rand(0, 1) < 0.5f ? PI / 2 : -PI / 2) : Rand(0, 2 * PI);
-                b.rot = MatrixMultiply(MatrixRotateZ(roll), MatrixRotateY(yaw));
+                b.rot = b.upright ? MatrixRotateY(yaw) : MatrixMultiply(MatrixRotateZ(roll), MatrixRotateY(yaw));
                 b.resting = true;
                 b.vel = { 0, 0, 0 };
             }

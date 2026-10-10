@@ -73,6 +73,7 @@ void SimPlayer::Respawn(Vector3 feet, float yaw) {
     respawnTimer = 0.0f;
     deathClock = 0.0f;
     hitFlash = hitReact = 0.0f;
+    helmet = true;
 }
 
 SoldierView SimPlayer::View() const {
@@ -97,6 +98,7 @@ SoldierView SimPlayer::View() const {
     v.health = body.GetHealth();
     v.maxHealth = body.GetMaxHealth();
     v.eyeHeight = body.GetEyeHeight();
+    v.helmet = helmet;
     return v;
 }
 
@@ -187,6 +189,37 @@ GameSim::GameSim(const World& w, int botCount, unsigned s) : world(w), spawns(Ge
         bots.back().Spawn(spawns[i % spawns.size()].position, world);
     }
     botTarget.assign(bots.size(), NO_ID);
+    botHelmet.assign(bots.size(), true);
+    botWasAlive.assign(bots.size(), true);
+    botKills.assign(bots.size(), 0);
+    botDeaths.assign(bots.size(), 0);
+}
+
+SoldierView GameSim::BotView(int index) const {
+    SoldierView v = bots[index].View();
+    v.id = (uint8_t)(BOT_ID_BASE + index);
+    v.helmet = botHelmet[index];
+    return v;
+}
+
+bool ShotFromBehind(Vector3 shotDir, Vector3 facing) {
+    Vector3 d = { shotDir.x, 0.0f, shotDir.z }, f = { facing.x, 0.0f, facing.z };
+    if (Vector3LengthSqr(d) < 1e-6f || Vector3LengthSqr(f) < 1e-6f) return false; // straight down or up: not the back
+    // Travelling the way the head faces (within 60 degrees) = coming in from behind
+    return Vector3DotProduct(Vector3Normalize(d), Vector3Normalize(f)) > 0.5f;
+}
+
+bool GameSim::HelmetDeflects(bool& helmet, Vector3 facing, Vector3 head, Ray shot, uint8_t actor, uint8_t target) {
+    if (!helmet || !ShotFromBehind(shot.direction, facing)) return false;
+    helmet = false;
+    GameEvent e;
+    e.type = EventType::HelmetOff;
+    e.actor = actor;
+    e.target = target;
+    e.from = head;
+    e.to = Vector3Add(head, shot.direction);
+    events.push_back(e);
+    return true;
 }
 
 SimPlayer* GameSim::AddPlayer(const std::string& name) {
@@ -326,6 +359,28 @@ void GameSim::ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTim
     shot.surface = (uint8_t)wall.surface;
     if (headshot) shot.flags |= EVENT_HEADSHOT;
 
+    // A helmet stops one shot from behind; from anywhere else it's no help
+    if (headshot && (kind == HitKind::Player || kind == HitKind::Bot)) {
+        bool deflected = false;
+        if (kind == HitKind::Player) {
+            SimPlayer* victim = Find(target);
+            Hitbox h = HitboxAt(target, t);
+            deflected = HelmetDeflects(victim->helmet, victim->body.GetLookDirection(), Vector3Add(h.eye, { 0, 0.08f, 0 }), ray,
+                                       shooter.id, target);
+        } else {
+            int j = target - BOT_ID_BASE;
+            SoldierView v = bots[j].View();
+            bool helmet = botHelmet[j];
+            deflected = HelmetDeflects(helmet, { sinf(v.yaw), 0, cosf(v.yaw) }, bots[j].HeadCenter(), ray, shooter.id, target);
+            botHelmet[j] = helmet;
+        }
+        if (deflected) {
+            shot.flags |= EVENT_DEFLECTED;
+            events.insert(events.end() - 1, shot); // the shot first, then the helmet flying
+            return;
+        }
+    }
+
     int damage = headshot ? def.headDamage : def.bodyDamage;
     bool killed = false;
     if (kind == HitKind::Player) {
@@ -352,6 +407,7 @@ void GameSim::ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTim
         events.push_back(shot);
         if (killed) {
             shooter.kills++;
+            botDeaths[target - BOT_ID_BASE]++;
             GameEvent k;
             k.type = EventType::Killed;
             k.actor = shooter.id;
@@ -373,6 +429,7 @@ void GameSim::ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTim
 
 void GameSim::KillPlayer(SimPlayer& victim, uint8_t killer, int weapon, bool headshot, Vector3 from) {
     victim.deaths++;
+    if (killer >= BOT_ID_BASE && killer != NO_ID && killer - BOT_ID_BASE < (int)bots.size()) botKills[killer - BOT_ID_BASE]++;
     victim.respawnTimer = respawnDelay;
     victim.deathClock = 0.0f;
     victim.rifle.CancelReload();
@@ -478,6 +535,8 @@ void GameSim::UpdateBots(float dt) {
             botTarget[i] = NO_ID;
         }
         e.Update(dt, t, world);
+        if (e.IsAlive() && !botWasAlive[i]) botHelmet[i] = true; // respawned with a fresh one
+        botWasAlive[i] = e.IsAlive();
 
         for (const Ray& shot : e.TakeShots()) ResolveBotShot(i, shot);
     }
@@ -518,11 +577,30 @@ void GameSim::ResolveBotShot(int shooter, Ray shot) {
     s.normal = wall.normal;
     s.surface = (uint8_t)wall.surface;
     if (headshot) s.flags |= EVENT_HEADSHOT;
+    if (headshot && (victim || botVictim >= 0)) {
+        bool deflected;
+        if (victim) {
+            deflected = HelmetDeflects(victim->helmet, victim->body.GetLookDirection(),
+                                       Vector3Add(CurrentHitbox(*victim).eye, { 0, 0.08f, 0 }), shot, s.actor, s.target);
+        } else {
+            SoldierView v = bots[botVictim].View();
+            bool helmet = botHelmet[botVictim];
+            deflected = HelmetDeflects(helmet, { sinf(v.yaw), 0, cosf(v.yaw) }, bots[botVictim].HeadCenter(), shot, s.actor, s.target);
+            botHelmet[botVictim] = helmet;
+        }
+        if (deflected) {
+            s.flags |= EVENT_DEFLECTED;
+            events.insert(events.end() - 1, s);
+            return;
+        }
+    }
     events.push_back(s);
     int damage = headshot ? REVOLVER.headDamage : REVOLVER.bodyDamage;
 
     if (botVictim >= 0) {
         if (bots[botVictim].TakeHit(e.GetMuzzle(), damage)) {
+            botKills[shooter]++;
+            botDeaths[botVictim]++;
             GameEvent k;
             k.type = EventType::Killed;
             k.actor = s.actor;

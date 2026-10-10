@@ -14,6 +14,7 @@
 #include "effects.hpp"
 #include "hud.hpp"
 #include "soldier.hpp"
+#include "helmet.hpp"
 #include "game/session.hpp"
 #include "raymath.h"
 #include "rlgl.h"
@@ -115,6 +116,7 @@ int main(int argc, char** argv) {
     Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
     SetWeaponModelShader(Render::LitShader());
+    InitHelmet(&character);
     float sunOnGun = 1.0f; // eases between 0 (player in shade) and 1
     std::vector<SpawnPoint> spawns = GetSpawnPoints();
 
@@ -292,7 +294,11 @@ int main(int argc, char** argv) {
                     }
                     if (e.Is(EVENT_PREDICTED)) break; // what it hit comes from the host
                     // What it hit
-                    if (e.hit == HitKind::World) {
+                    if (e.Is(EVENT_DEFLECTED)) {
+                        Fx::Impact(e.to, Vector3Negate(dir), Surface::Steel);
+                        audio.PlayImpact(Surface::Steel, e.to, ear, right);
+                        if (mine) audio.Play(Sfx::HitTick, 0.4f);
+                    } else if (e.hit == HitKind::World) {
                         Fx::Impact(e.to, e.normal, (Surface)e.surface);
                         audio.PlayImpact((Surface)e.surface, e.to, ear, right);
                     } else if (e.hit == HitKind::Player || e.hit == HitKind::Bot) {
@@ -343,6 +349,35 @@ int main(int argc, char** argv) {
                 case EventType::Left:
                     addFeed(nameOf(e.target) + " left", { 170, 172, 168, 255 });
                     break;
+                case EventType::HelmetOff: {
+                    Vector3 dir = Vector3Normalize(Vector3Subtract(e.to, e.from));
+                    dir.y = 0.0f;
+                    dir = Vector3LengthSqr(dir) > 1e-6f ? Vector3Normalize(dir) : Vector3{ 0, 0, 1 };
+                    Matrix start;
+                    Vector3 carried{};
+                    if (e.target == me) {
+                        // Yours: off the back of your head and past you
+                        Vector3 head = Vector3Add(cam.position, { 0, 0.08f, 0 });
+                        Vector3 look = local->body.GetLookDirection();
+                        start = MatrixMultiply(MatrixRotateY(atan2f(look.x, look.z)), MatrixTranslate(head.x, head.y, head.z));
+                        carried = local->body.GetVelocity();
+                        audio.Play(Sfx::Hurt, 0.5f);
+                        feel.shake = 0.7f;
+                        addFeed("Your helmet stopped a round", { 170, 200, 140, 255 });
+                    } else if (const SoldierView* v = findSoldier(e.target)) {
+                        start = SoldierHelmetTransform(&character, *v);
+                    } else {
+                        start = MatrixTranslate(e.from.x, e.from.y, e.from.z);
+                    }
+                    Vector3 at = { start.m12, start.m13, start.m14 };
+                    Vector3 vel = Vector3Add(Vector3Add(Vector3Scale(dir, 3.2f), { 0, 2.6f, 0 }), carried);
+                    Matrix rot = start;
+                    rot.m12 = rot.m13 = rot.m14 = 0.0f;
+                    Fx::Tumble(at, vel, rot, DEBRIS_HELMET, HelmetRestHeight());
+                    Fx::Impact(e.from, Vector3Negate(dir), Surface::Steel);
+                    audio.PlayImpact(Surface::Steel, e.from, ear, right);
+                    break;
+                }
                 case EventType::Respawned:
                     break;
                 }
@@ -408,8 +443,10 @@ int main(int argc, char** argv) {
 
             Fx::Update(dt);
             for (const Fx::CasingBounce& b : Fx::TakeCasingBounces()) {
-                bool mag = b.kind == DEBRIS_RIFLE_MAG;
-                audio.PlayAt(mag ? Sfx::MagDrop : Sfx::CasingTink, b.position, ear, right, (mag ? 0.4f : 0.25f) + 0.5f * b.strength);
+                if (b.kind == DEBRIS_RIFLE_MAG || b.kind == DEBRIS_HELMET)
+                    audio.PlayAt(Sfx::MagDrop, b.position, ear, right, 0.4f + 0.5f * b.strength);
+                else
+                    audio.PlayAt(Sfx::CasingTink, b.position, ear, right, 0.06f + 0.14f * b.strength); // brass: a faint tinkle
             }
             feel.hurt = std::max(0.0f, feel.hurt - dt * 1.2f);
             feel.shake = std::max(0.0f, feel.shake - dt * 3.0f);
@@ -596,6 +633,7 @@ int main(int argc, char** argv) {
                 hs.screenW = SCREEN_W;
                 hs.screenH = SCREEN_H;
                 hs.health = local->body.GetHealth();
+                hs.helmet = local->helmet;
                 hs.maxHealth = local->body.GetMaxHealth();
                 hs.alive = local->Alive();
                 hs.deathTimer = session->RespawnTimer();
@@ -665,6 +703,7 @@ int main(int argc, char** argv) {
     // Models share the lit shader: give them back the default before unloading
     Render::DetachLitShader(character.model);
     SetWeaponModelShader(Shader{ rlGetShaderIdDefault(), rlGetShaderLocsDefault() });
+    UnloadHelmet();
     Render::Shutdown();
     Fx::Shutdown();
     Hud::Shutdown();

@@ -39,6 +39,10 @@ Join using one of the LAN addresses the host shows (e.g. `192.168.1.20`). The fi
 
 Some connections can't accept incoming traffic, whatever you forward. These include carrier-grade NAT (common on mobile and some fibre ISPs; a WAN address of 100.64.x.x–100.127.x.x on the router is the giveaway) and some university or office networks. In that case a VPN-style LAN tool such as Tailscale, ZeroTier or Radmin VPN works: everyone joins the host's address on that virtual network.
 
+## Helmets
+
+Everyone, players and bots, wears a steel helmet. A shot to the **back** of the head glances off: the helmet flies off, the wearer takes no damage, and the HUD shows **NO HELMET** until the next respawn. A shot to the head from any other direction goes straight through it and counts as a normal headshot.
+
 ## Controls
 
 | Key | Action |
@@ -48,7 +52,7 @@ Some connections can't accept incoming traffic, whatever you forward. These incl
 | R | Reload |
 | 1 / 2 / mouse wheel | Switch between the FAL and the revolver |
 | Q / E | Lean |
-| Tab (hold) | Scoreboard |
+| Tab (hold) | Scoreboard (players and bots) |
 | Esc | Pause menu (resume, leave game, quit) |
 | F3 | FPS counter |
 | Enter | Respawn at the other spawn (offline only) |

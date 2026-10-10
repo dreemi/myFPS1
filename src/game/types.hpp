@@ -41,6 +41,7 @@ enum class EventType : uint8_t {
     Joined,     // target joined (name in the roster)
     Left,       // target left
     Respawned,  // target respawned at `to`
+    HelmetOff,  // target's helmet was knocked off by actor's shot: the head at `from`, flying toward `to`
 };
 enum class HitKind : uint8_t { None, World, Player, Bot };
 enum EventFlag : uint8_t {
@@ -48,6 +49,7 @@ enum EventFlag : uint8_t {
     EVENT_KILLED = 2,
     EVENT_PREDICTED = 4,       // the local client's own guess (its shot, before the host answers)
     EVENT_ECHO = 8,            // the host's answer to a shot the local client already showed
+    EVENT_DEFLECTED = 16,      // the shot glanced off the back of a helmet (no damage)
 };
 struct GameEvent {
     EventType type = EventType::Shot;
@@ -83,6 +85,7 @@ struct SoldierView {
     bool reloading = false;
     int health = 100, maxHealth = 100;
     float eyeHeight = 1.7f;
+    bool helmet = true;        // still wearing its helmet
 };
 
 // One line of the scoreboard
@@ -91,4 +94,5 @@ struct ScoreRow {
     std::string name;
     int kills = 0, deaths = 0, ping = 0;
     bool local = false, alive = true;
+    bool bot = false;
 };

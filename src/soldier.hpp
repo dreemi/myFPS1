@@ -10,6 +10,8 @@
 // Gun space -> world for the gun in its hand (barrel along -Z, tilted to its aim)
 Matrix SoldierGunTransform(const CharacterAssets* character, const SoldierView& s);
 Vector3 SoldierMuzzle(const CharacterAssets* character, const SoldierView& s);
+// Helmet space -> world for the helmet on its head (also where a knocked-off one starts)
+Matrix SoldierHelmetTransform(const CharacterAssets* character, const SoldierView& s);
 // Which animation a player-controlled soldier plays, from how it moves
 CharAnim SoldierAnim(float speed, bool crouching, bool grounded);
 // Stride length (m per animation cycle) of an animation, so feet don't slide

@@ -88,7 +88,7 @@ Matrix FalMagazineRock(float degrees, float drop); // magazine rocked about its 
 void DrawRifleCartridge(Matrix transform, bool fired);
 
 // Anything that falls out of a gun and lands in the world
-enum DebrisKind { DEBRIS_REVOLVER_ROUND, DEBRIS_REVOLVER_CASE, DEBRIS_RIFLE_ROUND, DEBRIS_RIFLE_CASE, DEBRIS_RIFLE_MAG };
+enum DebrisKind { DEBRIS_REVOLVER_ROUND, DEBRIS_REVOLVER_CASE, DEBRIS_RIFLE_ROUND, DEBRIS_RIFLE_CASE, DEBRIS_RIFLE_MAG, DEBRIS_HELMET };
 void DrawDebris(Matrix transform, int kind); // cartridges: origin at the rim face, bullet along -Z; magazines: origin at the centre
 
 // What the first-person model needs besides the gun's own parts

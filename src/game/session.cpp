@@ -81,9 +81,19 @@ std::vector<ScoreRow> Session::Scoreboard() const {
     if (sim) {
         for (const auto& p : sim->Players())
             rows.push_back({ p->id, p->name, p->kills, p->deaths, p->ping, p->id == localId, p->Alive() });
+        for (int i = 0; i < (int)sim->Bots().size(); i++) {
+            uint8_t id = (uint8_t)(BOT_ID_BASE + i);
+            rows.push_back({ id, BotName(id), sim->BotKills(i), sim->BotDeaths(i), 0, false, sim->Bots()[i].IsAlive(), true });
+        }
     } else if (!snapshots.empty()) {
-        for (const Snapshot::PlayerEntry& p : snapshots.back().players)
+        const Snapshot& s = snapshots.back();
+        for (const Snapshot::PlayerEntry& p : s.players)
             rows.push_back({ p.view.id, NameOf(p.view.id), p.kills, p.deaths, p.ping, p.view.id == localId, p.view.alive });
+        for (size_t i = 0; i < s.bots.size(); i++) {
+            uint8_t id = (uint8_t)(BOT_ID_BASE + s.bots[i].id);
+            Snapshot::BotScore sc = i < s.botScores.size() ? s.botScores[i] : Snapshot::BotScore{};
+            rows.push_back({ id, BotName(id), sc.kills, sc.deaths, 0, false, s.bots[i].alive, true });
+        }
     }
     std::sort(rows.begin(), rows.end(), [](const ScoreRow& a, const ScoreRow& b) {
         return a.kills != b.kills ? a.kills > b.kills : a.deaths < b.deaths;
@@ -168,9 +178,7 @@ void Session::Update(float dt, const LocalInput& in) {
         if (p->id != localId) others.push_back(p->View());
     botViews.clear();
     for (int i = 0; i < (int)sim->Bots().size(); i++) {
-        SoldierView v = sim->Bots()[i].View();
-        v.id = (uint8_t)(BOT_ID_BASE + i);
-        botViews.push_back(v);
+        botViews.push_back(sim->BotView(i));
     }
 }
 
@@ -238,11 +246,13 @@ Snapshot Session::BuildSnapshot(const SimPlayer& forPlayer) const {
     o.wanted = (uint8_t)forPlayer.wanted;
     o.holster = forPlayer.holster;
     o.respawnTimer = forPlayer.respawnTimer;
+    o.helmet = forPlayer.helmet;
     for (const auto& p : sim->Players()) s.players.push_back({ p->View(), p->kills, p->deaths, p->ping });
     for (int i = 0; i < (int)sim->Bots().size(); i++) {
-        SoldierView v = sim->Bots()[i].View();
+        SoldierView v = sim->BotView(i);
         v.id = (uint8_t)i;
         s.bots.push_back(v);
+        s.botScores.push_back({ sim->BotKills(i), sim->BotDeaths(i) });
     }
     return s;
 }
@@ -401,6 +411,7 @@ void Session::Reconcile(const Snapshot& snap) {
     else viewOffset = { 0, 0, 0 }; // a respawn or a big correction: just go there
 
     respawnTimer = o.respawnTimer;
+    local->helmet = o.helmet;
     if (!local->Alive()) {
         if (wasAlive) local->deathClock = 0.0f;
         return;

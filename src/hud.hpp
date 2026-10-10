@@ -23,6 +23,7 @@ struct State {
     int screenW = 1280, screenH = 720;
     // Player
     int health = 100, maxHealth = 100;
+    bool helmet = true;
     bool alive = true;
     float deathTimer = 0.0f;      // seconds until respawn
     float hurt = 0.0f;            // recent damage (0..1), red screen edges

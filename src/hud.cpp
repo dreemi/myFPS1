@@ -150,6 +150,8 @@ static void HealthPanel(const State& s) {
         if (fill > 0.0f) DrawRectangleRec({ r.x, r.y, r.width * fill, r.height }, c);
     }
     Text("HEALTH", bx, y + 40, 13, DIM);
+    if (s.helmet) Text("HELMET", bx + bw, y + 40, 13, { 150, 170, 110, 255 }, RIGHT);
+    else Text("NO HELMET", bx + bw, y + 40, 13, { 200, 110, 90, 220 }, RIGHT);
 }
 
 static void AmmoPanel(const State& s) {
@@ -322,7 +324,7 @@ static void Scoreboard(const State& s) {
         Text(row.name.c_str(), r.x + 24, y, 20, row.local ? ACCENT : c);
         Text(TextFormat("%d", row.kills), r.x + 340, y, 20, c, RIGHT);
         Text(TextFormat("%d", row.deaths), r.x + 430, y, 20, c, RIGHT);
-        Text(row.ping > 0 ? TextFormat("%d", row.ping) : "-", r.x + w - 24, y, 20, DIM, RIGHT);
+        Text(row.bot ? "BOT" : (row.ping > 0 ? TextFormat("%d", row.ping) : "-"), r.x + w - 24, y, 20, DIM, RIGHT);
         y += rowH;
     }
 }

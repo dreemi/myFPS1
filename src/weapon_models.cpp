@@ -1,5 +1,6 @@
 #include "weapon_models.hpp"
 #include "render.hpp"
+#include "helmet.hpp"
 #include "raymath.h"
 #include "rlgl.h"
 #include <cstdio>
@@ -440,6 +441,7 @@ void DrawDebris(Matrix transform, int kind) {
         case DEBRIS_REVOLVER_CASE: DrawCartridge(transform, true); break;
         case DEBRIS_RIFLE_ROUND: DrawRifleCartridge(transform, false); break;
         case DEBRIS_RIFLE_CASE: DrawRifleCartridge(transform, true); break;
+        case DEBRIS_HELMET: DrawHelmet(transform); break;
         case DEBRIS_RIFLE_MAG: {
             // A loose magazine's origin is its centre; the part is modelled in place under the gun
             Vector3 c = { 0.0f, -0.08f, -0.0765f };
