@@ -169,6 +169,26 @@ int main() {
         CHECK(std::isfinite(b->body.GetFeet().x) && moved < 0.5f, "NaN and oversized commands do no harm (moved %.2f m)", moved);
     }
 
+    std::printf("Bots fight each other\n");
+    {
+        GameSim sim(world, 2, 3); // no players: the bots only have each other
+        int botKills = 0, botHits = 0, selfHits = 0;
+        for (int i = 0; i < 60 * 180 && botKills == 0; i++) {
+            sim.Update(DT);
+            for (const GameEvent& e : sim.TakeEvents()) {
+                bool byBot = e.actor >= BOT_ID_BASE && e.actor != NO_ID;
+                if (byBot && e.type == EventType::Shot && e.hit == HitKind::Bot) {
+                    botHits++;
+                    if (e.target == e.actor) selfHits++;
+                }
+                if (byBot && e.type == EventType::Killed && e.target >= BOT_ID_BASE && e.target != e.actor) botKills++;
+            }
+        }
+        CHECK(botHits > 0 && selfHits == 0, "bots shoot and hit each other (%d hits)", botHits);
+        CHECK(botKills > 0, "and kill each other");
+        CHECK(BotName(BOT_ID_BASE + 1) == "RIVAL 2", "bots have their own names in the kill feed");
+    }
+
     std::printf("Host and client over loopback\n");
     {
         const uint16_t port = 27391;

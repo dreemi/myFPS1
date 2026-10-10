@@ -100,6 +100,7 @@ private:
     bool Execute(SimPlayer& p, const PlayerCommand& cmd); // true: dry fire
     void ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTime);
     void UpdateBots(float dt);
+    void ResolveBotShot(int shooter, Ray shot);
     void KillPlayer(SimPlayer& victim, uint8_t killer, int weapon, bool headshot, Vector3 from);
     void RespawnPlayer(SimPlayer& p);
     Hitbox CurrentHitbox(const SimPlayer& p) const;
@@ -110,6 +111,7 @@ private:
     World world;
     std::vector<std::unique_ptr<SimPlayer>> players;
     std::vector<Enemy> bots;
+    std::vector<uint8_t> botTarget;  // who each bot is fighting (a player id or BOT_ID_BASE + index)
     std::deque<HistoryFrame> history;
     std::vector<GameEvent> events;
     std::vector<SpawnPoint> spawns;

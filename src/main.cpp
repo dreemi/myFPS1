@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
             for (const ScoreRow& r : scores) feel.names[r.id] = r.name;
         }
         auto nameOf = [&](uint8_t id) -> std::string {
-            if (id >= BOT_ID_BASE && id != NO_ID) return "RIVAL";
+            if (id >= BOT_ID_BASE && id != NO_ID) return BotName(id);
             auto it = feel.names.find(id);
             return it != feel.names.end() ? it->second : std::string("?");
         };

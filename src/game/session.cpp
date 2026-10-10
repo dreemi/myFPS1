@@ -66,7 +66,7 @@ int Session::PlayerCount() const {
 }
 
 std::string Session::NameOf(uint8_t id) const {
-    if (id >= BOT_ID_BASE && id != NO_ID) return "RIVAL";
+    if (id >= BOT_ID_BASE && id != NO_ID) return BotName(id);
     if (sim) {
         if (const SimPlayer* p = sim->Find(id)) return p->name;
     } else {

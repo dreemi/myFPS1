@@ -10,6 +10,7 @@
 constexpr int MAX_PLAYERS = 8;
 constexpr uint8_t NO_ID = 255;
 constexpr uint8_t BOT_ID_BASE = 100;   // ids from here up are bots (BOT_ID_BASE + index)
+inline std::string BotName(uint8_t id) { return "RIVAL " + std::to_string(id - BOT_ID_BASE + 1); }
 constexpr int WEAPON_RIFLE = 0, WEAPON_REVOLVER = 1;
 
 // One frame of a player's intent, as sent from a client to the host

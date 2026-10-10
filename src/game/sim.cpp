@@ -186,6 +186,7 @@ GameSim::GameSim(const World& w, int botCount, unsigned s) : world(w), spawns(Ge
         bots.emplace_back(seed * 7919u + (unsigned)i * 104729u + 1u);
         bots.back().Spawn(spawns[i % spawns.size()].position, world);
     }
+    botTarget.assign(bots.size(), NO_ID);
 }
 
 SimPlayer* GameSim::AddPlayer(const std::string& name) {
@@ -424,75 +425,129 @@ void GameSim::RespawnPlayer(SimPlayer& p) {
     events.push_back(e);
 }
 
+// What a bot aims at: a player's hitboxes, or another bot's
+static EnemyTarget BotAsTarget(const Enemy& e) {
+    EnemyTarget t;
+    t.feet = e.GetFeet();
+    t.eye = e.HeadCenter();
+    t.bodyTop = e.BodyBounds().max.y - e.GetFeet().y;
+    t.alive = e.IsAlive();
+    return t;
+}
+
 void GameSim::UpdateBots(float dt) {
     for (int i = 0; i < (int)bots.size(); i++) {
         Enemy& e = bots[i];
-        // Its target: the nearest player it can see, else the nearest alive one
-        SimPlayer* target = nullptr;
-        float bestSeen = 1e9f, bestAny = 1e9f;
-        SimPlayer* nearest = nullptr;
-        Vector3 eye = Vector3Add(e.GetFeet(), { 0, 1.69f, 0 });
+        // Everyone else is fair game, players and the other bots alike
+        struct Candidate { uint8_t id; EnemyTarget t; };
+        std::vector<Candidate> candidates;
         for (auto& p : players) {
             if (!p->Alive()) continue;
-            float d = Vector3Distance(e.GetFeet(), p->body.GetFeet());
-            if (d < bestAny) { bestAny = d; nearest = p.get(); }
-            if (d < bestSeen && HasLineOfSight(eye, p->body.GetCamera().position, world)) { bestSeen = d; target = p.get(); }
+            Hitbox h = CurrentHitbox(*p);
+            EnemyTarget t;
+            t.feet = h.feet;
+            t.eye = h.eye;
+            t.bodyTop = h.bodyTop;
+            candidates.push_back({ p->id, t });
+        }
+        for (int j = 0; j < (int)bots.size(); j++)
+            if (j != i && bots[j].IsAlive()) candidates.push_back({ (uint8_t)(BOT_ID_BASE + j), BotAsTarget(bots[j]) });
+
+        // Keep fighting the same one while it's in sight (no flicking between two);
+        // otherwise the nearest it can see, else the nearest of all to go looking for
+        Vector3 eye = Vector3Add(e.GetFeet(), { 0, 1.69f, 0 });
+        const Candidate* target = nullptr;
+        const Candidate* nearest = nullptr;
+        float bestSeen = 1e9f, bestAny = 1e9f;
+        for (const Candidate& c : candidates) {
+            float d = Vector3Distance(e.GetFeet(), c.t.feet);
+            if (d < bestAny) { bestAny = d; nearest = &c; }
+            if (!HasLineOfSight(eye, c.t.eye, world)) continue;
+            if (c.id == botTarget[i]) d -= 1e6f; // its current target wins while visible
+            if (d < bestSeen) { bestSeen = d; target = &c; }
         }
         if (!target) target = nearest;
         EnemyTarget t;
         if (target) {
-            Hitbox h = CurrentHitbox(*target);
-            t.feet = h.feet;
-            t.eye = h.eye;
-            t.bodyTop = h.bodyTop;
-            t.alive = true;
+            t = target->t;
+            botTarget[i] = target->id;
         } else {
             t.feet = spawns[0].position;
             t.eye = Vector3Add(t.feet, { 0, 1.7f, 0 });
             t.alive = false;
+            botTarget[i] = NO_ID;
         }
         e.Update(dt, t, world);
 
-        // Its bullets can hit anyone in the way
-        for (const Ray& shot : e.TakeShots()) {
-            WorldHit wall = TraceWorld(shot, world, 100.0f);
-            float best = wall.distance;
-            SimPlayer* victim = nullptr;
-            bool headshot = false;
-            for (auto& p : players) {
-                if (!p->Alive()) continue;
-                Hitbox h = CurrentHitbox(*p);
-                bool head = false;
-                if (RayHitsPlayer(shot, h.feet, h.eye, h.bodyTop, &best, &head)) { victim = p.get(); headshot = head; }
-            }
-            GameEvent s;
-            s.type = EventType::Shot;
-            s.actor = (uint8_t)(BOT_ID_BASE + i);
-            s.weapon = WEAPON_REVOLVER;
-            s.hit = victim ? HitKind::Player : (wall.hit ? HitKind::World : HitKind::None);
-            s.target = victim ? victim->id : NO_ID;
-            s.from = shot.position;
-            s.to = Vector3Add(shot.position, Vector3Scale(shot.direction, best));
-            s.normal = wall.normal;
-            s.surface = (uint8_t)wall.surface;
-            if (headshot) s.flags |= EVENT_HEADSHOT;
-            events.push_back(s);
-            if (!victim) continue;
-            int damage = headshot ? REVOLVER.headDamage : REVOLVER.bodyDamage;
-            GameEvent hurt;
-            hurt.type = EventType::Hurt;
-            hurt.actor = s.actor;
-            hurt.target = victim->id;
-            hurt.weapon = WEAPON_REVOLVER;
-            hurt.amount = (int16_t)damage;
-            hurt.from = e.GetMuzzle();
-            hurt.flags = headshot ? EVENT_HEADSHOT : 0;
-            events.push_back(hurt);
-            victim->hitFlash = 0.15f;
-            victim->hitReact = 0.18f;
-            if (victim->body.TakeDamage(damage)) KillPlayer(*victim, s.actor, WEAPON_REVOLVER, headshot, e.GetMuzzle());
+        for (const Ray& shot : e.TakeShots()) ResolveBotShot(i, shot);
+    }
+}
+
+// A bot's bullet: it can hit anyone in the way, player or bot
+void GameSim::ResolveBotShot(int shooter, Ray shot) {
+    Enemy& e = bots[shooter];
+    WorldHit wall = TraceWorld(shot, world, 100.0f);
+    float best = wall.distance;
+    SimPlayer* victim = nullptr;
+    int botVictim = -1;
+    bool headshot = false;
+    for (auto& p : players) {
+        if (!p->Alive()) continue;
+        Hitbox h = CurrentHitbox(*p);
+        bool head = false;
+        if (RayHitsPlayer(shot, h.feet, h.eye, h.bodyTop, &best, &head)) { victim = p.get(); headshot = head; }
+    }
+    for (int j = 0; j < (int)bots.size(); j++) {
+        if (j == shooter || !bots[j].IsAlive()) continue;
+        EnemyRayHit hit = bots[j].Raycast(shot);
+        if (hit.hit && hit.distance < best) {
+            best = hit.distance;
+            botVictim = j;
+            victim = nullptr;
+            headshot = hit.headshot;
         }
     }
+    GameEvent s;
+    s.type = EventType::Shot;
+    s.actor = (uint8_t)(BOT_ID_BASE + shooter);
+    s.weapon = WEAPON_REVOLVER;
+    s.hit = victim ? HitKind::Player : botVictim >= 0 ? HitKind::Bot : (wall.hit ? HitKind::World : HitKind::None);
+    s.target = victim ? victim->id : botVictim >= 0 ? (uint8_t)(BOT_ID_BASE + botVictim) : NO_ID;
+    s.from = shot.position;
+    s.to = Vector3Add(shot.position, Vector3Scale(shot.direction, best));
+    s.normal = wall.normal;
+    s.surface = (uint8_t)wall.surface;
+    if (headshot) s.flags |= EVENT_HEADSHOT;
+    events.push_back(s);
+    int damage = headshot ? REVOLVER.headDamage : REVOLVER.bodyDamage;
+
+    if (botVictim >= 0) {
+        if (bots[botVictim].TakeHit(e.GetMuzzle(), damage)) {
+            GameEvent k;
+            k.type = EventType::Killed;
+            k.actor = s.actor;
+            k.target = s.target;
+            k.weapon = WEAPON_REVOLVER;
+            k.flags = headshot ? EVENT_HEADSHOT : 0;
+            k.from = e.GetMuzzle();
+            events.push_back(k);
+            events[events.size() - 2].flags |= EVENT_KILLED;
+        }
+        return;
+    }
+    if (!victim) return;
+    GameEvent hurt;
+    hurt.type = EventType::Hurt;
+    hurt.actor = s.actor;
+    hurt.target = victim->id;
+    hurt.weapon = WEAPON_REVOLVER;
+    hurt.amount = (int16_t)damage;
+    hurt.from = e.GetMuzzle();
+    hurt.flags = headshot ? EVENT_HEADSHOT : 0;
+    events.push_back(hurt);
+    victim->hitFlash = 0.15f;
+    victim->hitReact = 0.18f;
+    if (victim->body.TakeDamage(damage)) KillPlayer(*victim, s.actor, WEAPON_REVOLVER, headshot, e.GetMuzzle());
 }
 
 void GameSim::Update(float dt) {
