@@ -1,0 +1,245 @@
+// Multiplayer tests: the wire format, the authoritative simulation, and a real
+// host and client talking over loopback UDP. No window needed.
+#include "../src/game/session.hpp"
+#include "../src/game/sim.hpp"
+#include "../src/net/protocol.hpp"
+#include "raymath.h"
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <thread>
+
+static int failures = 0;
+
+#define CHECK(cond, ...)                                   \
+    do {                                                   \
+        if (cond) { std::printf("  pass: "); }             \
+        else { std::printf("  FAIL: "); failures++; }      \
+        std::printf(__VA_ARGS__);                          \
+        std::printf("\n");                                 \
+    } while (0)
+
+static const float DT = 1.0f / 60.0f;
+
+static PlayerCommand Command(uint32_t seq, float yaw, float pitch, uint16_t buttons, float viewTime = 0.0f) {
+    PlayerCommand c;
+    c.seq = seq;
+    c.dt = DT;
+    c.yaw = yaw;
+    c.pitch = pitch;
+    c.buttons = buttons;
+    c.weapon = WEAPON_RIFLE;
+    c.viewTime = viewTime;
+    return c;
+}
+
+// Yaw and pitch that look from one point at another, in the player's convention
+static void LookAt(const SimPlayer& p, Vector3 target, float& yaw, float& pitch) {
+    Camera3D cam = p.body.GetCamera();
+    Vector3 d = Vector3Normalize(Vector3Subtract(target, cam.position));
+    // Find the yaw that the player maps to this direction by search (keeps the test
+    // independent of the controller's angle convention)
+    float bestYaw = 0, best = -2;
+    for (int i = 0; i < 3600; i++) {
+        float y = i * (2 * PI / 3600);
+        Player probe = p.body;
+        PlayerInput in;
+        in.hasAim = true;
+        in.aimYaw = y;
+        in.aimPitch = 0;
+        PlayerState s = probe.GetState();
+        s.yaw = y;
+        s.pitch = 0;
+        probe.SetState(s);
+        Vector3 f = probe.GetLookDirection();
+        float dot = f.x * d.x + f.z * d.z;
+        if (dot > best) { best = dot; bestYaw = y; }
+    }
+    yaw = bestYaw;
+    float bestPitch = 0;
+    best = -2;
+    for (int i = -890; i <= 890; i++) {
+        float pt = i * 0.1f * DEG2RAD;
+        Player probe = p.body;
+        PlayerState s = probe.GetState();
+        s.yaw = yaw;
+        s.pitch = pt;
+        probe.SetState(s);
+        float dot = Vector3DotProduct(probe.GetLookDirection(), d);
+        if (dot > best) { best = dot; bestPitch = pt; }
+    }
+    pitch = bestPitch;
+}
+
+static void Pump(Session& a, Session* b, float seconds) {
+    int frames = (int)(seconds / DT);
+    for (int i = 0; i < frames; i++) {
+        a.Update(DT, LocalInput{});
+        if (b) b->Update(DT, LocalInput{});
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+}
+
+int main() {
+    const World world = BuildTestWorld();
+
+    std::printf("Protocol\n");
+    {
+        std::vector<PlayerCommand> cmds = { Command(7, 1.25f, -0.3f, BTN_FORWARD | BTN_FIRE, 3.5f), Command(8, 1.3f, -0.2f, BTN_JUMP) };
+        std::vector<PlayerCommand> back;
+        bool ok = Proto::DecodeInput(Proto::EncodeInput(cmds), back);
+        CHECK(ok && back.size() == 2 && back[0].seq == 7 && back[1].buttons == BTN_JUMP, "input round-trips");
+        CHECK(ok && fabsf(back[0].yaw - 1.25f) < 1e-3f && fabsf(back[0].viewTime - 3.5f) < 1e-4f, "angles and view time survive");
+
+        std::vector<uint8_t> msg = Proto::EncodeInput(cmds);
+        msg.resize(msg.size() / 2);
+        CHECK(!Proto::DecodeInput(msg, back), "a truncated message is rejected");
+        std::vector<uint8_t> junk = { Proto::MSG_INPUT, 255, 1, 2 };
+        CHECK(!Proto::DecodeInput(junk, back), "junk is rejected");
+
+        Proto::Hello h;
+        h.name = "Ann";
+        Proto::Hello hb;
+        CHECK(Proto::DecodeHello(Proto::EncodeHello(h), hb) && hb.name == "Ann" && hb.version == Proto::VERSION, "hello round-trips");
+
+        GameEvent e;
+        e.type = EventType::Killed;
+        e.actor = 2;
+        e.target = BOT_ID_BASE;
+        e.flags = EVENT_HEADSHOT;
+        e.from = { 1, 2, 3 };
+        std::vector<GameEvent> eb;
+        CHECK(Proto::DecodeEvents(Proto::EncodeEvents({ e }), eb) && eb.size() == 1 && eb[0].type == EventType::Killed &&
+                  eb[0].target == BOT_ID_BASE && eb[0].Is(EVENT_HEADSHOT) && Vector3Distance(eb[0].from, e.from) < 0.01f,
+              "events round-trip");
+    }
+
+    std::printf("Authoritative simulation\n");
+    {
+        GameSim sim(world, 0, 1);
+        SimPlayer* a = sim.AddPlayer("A");
+        SimPlayer* b = sim.AddPlayer("B");
+        CHECK(a && b && a->id != b->id, "two players join");
+        for (int i = 0; i < MAX_PLAYERS - 2; i++) sim.AddPlayer("X");
+        CHECK(sim.AddPlayer("full") == nullptr, "a full game refuses more players");
+        for (int id = 2; id < MAX_PLAYERS; id++) sim.RemovePlayer((uint8_t)id);
+        CHECK(sim.Players().size() == 2, "players leave cleanly");
+
+        // Face each other in the open and fire: B dies, A scores, B respawns with full ammo
+        PlayerState sa = a->body.GetState(), sb = b->body.GetState();
+        sa.feet = { 0, 0, -6 };
+        sb.feet = { 0, 0, 6 };
+        a->body.SetState(sa);
+        b->body.SetState(sb);
+        b->rifle.SetState({ 3, 0.0f, 0.0f, false });
+        sim.Update(DT);
+        float yaw, pitch;
+        LookAt(*a, Vector3Add(b->body.GetFeet(), { 0, 1.0f, 0 }), yaw, pitch);
+        uint32_t seq = 1;
+        bool killed = false;
+        for (int i = 0; i < 120 && !killed; i++) {
+            sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, BTN_FIRE | (i == 0 ? BTN_FIRE_PRESSED : 0), sim.Time()));
+            sim.Update(DT);
+            for (const GameEvent& e : sim.TakeEvents())
+                if (e.type == EventType::Killed && e.target == b->id && e.actor == a->id) killed = true;
+        }
+        CHECK(killed, "the host resolves hits and kills");
+        CHECK(a->kills == 1 && b->deaths == 1, "kills and deaths are counted (%d, %d)", a->kills, b->deaths);
+        for (int i = 0; i < 300 && !b->Alive(); i++) sim.Update(DT);
+        CHECK(b->Alive() && b->body.GetHealth() == b->body.GetMaxHealth(), "the victim respawns at full health");
+        CHECK(b->rifle.GetAmmo() == b->rifle.GetDef().magazineSize, "and with a full magazine");
+
+        // A client can't move faster than real time by sending extra commands
+        Vector3 start = b->body.GetFeet();
+        // (10 s of sprinting sent at once, over one second of real time)
+        for (int i = 0; i < 600; i++) sim.QueueCommand(b->id, Command(1000 + i, 0, 0, BTN_FORWARD | BTN_SPRINT));
+        for (int i = 0; i < 60; i++) sim.Update(DT);
+        float moved = Vector3Distance(start, b->body.GetFeet());
+        CHECK(moved < 9.0f, "a flood of commands is limited to real time (moved %.2f m in 1 s)", moved);
+
+        // Nonsense input is dropped rather than trusted
+        PlayerCommand bad = Command(5000, NAN, 0, BTN_FORWARD);
+        Vector3 before = b->body.GetFeet();
+        sim.QueueCommand(b->id, bad);
+        PlayerCommand huge = Command(5001, 0, 0, BTN_FORWARD);
+        huge.dt = 10.0f;
+        sim.QueueCommand(b->id, huge);
+        sim.Update(DT);
+        moved = Vector3Distance(before, b->body.GetFeet());
+        CHECK(std::isfinite(b->body.GetFeet().x) && moved < 0.5f, "NaN and oversized commands do no harm (moved %.2f m)", moved);
+    }
+
+    std::printf("Host and client over loopback\n");
+    {
+        const uint16_t port = 27391;
+        SessionConfig hc;
+        hc.name = "Host";
+        hc.port = port;
+        hc.bots = 1;
+        Session host(SessionMode::Host, world, hc);
+        CHECK(host.State() == SessionState::Playing && host.Local(), "the host is playing straight away");
+
+        SessionConfig taken = hc;
+        Session second(SessionMode::Host, world, taken);
+        CHECK(second.State() == SessionState::Failed, "a second host on the same port fails cleanly: %s", second.StatusText().c_str());
+
+        SessionConfig cc;
+        cc.name = "Guest";
+        cc.address = "127.0.0.1";
+        cc.port = port;
+        Session client(SessionMode::Client, world, cc);
+        for (int i = 0; i < 300 && client.State() == SessionState::Connecting; i++) Pump(host, &client, DT);
+        CHECK(client.State() == SessionState::Playing && client.Local(), "the client connects: %s", client.StatusText().c_str());
+        Pump(host, &client, 0.5f);
+        CHECK(host.PlayerCount() == 2, "the host sees two players");
+        CHECK(client.Others().size() == 1, "the client sees the host's player");
+        CHECK(client.Bots().size() == 1, "and the bot");
+        bool named = false;
+        for (const ScoreRow& r : client.Scoreboard()) if (r.name == "Host") named = true;
+        CHECK(named, "names arrive with the roster");
+
+        // The client walks: predicted locally at once, and the host agrees
+        if (client.Local()) {
+            Vector3 start = client.Local()->body.GetFeet();
+            LocalInput walk;
+            walk.move.forward = true;
+            for (int i = 0; i < 60; i++) {
+                host.Update(DT, LocalInput{});
+                client.Update(DT, walk);
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            }
+            Pump(host, &client, 0.4f);
+            Vector3 predictedFeet = client.Local()->body.GetFeet();
+            Vector3 hostFeet{};
+            for (const SoldierView& v : host.Others()) hostFeet = v.feet;
+            float walked = Vector3Distance(start, predictedFeet);
+            float disagree = Vector3Distance(predictedFeet, hostFeet);
+            CHECK(walked > 2.0f, "the client moves (%.2f m)", walked);
+            CHECK(disagree < 0.15f, "the host's copy matches the prediction (off by %.3f m)", disagree);
+        }
+
+        // The client leaves: the host notices, carries on
+        client.Leave();
+        CHECK(client.State() == SessionState::Ended, "leaving ends the client's session");
+        Pump(host, nullptr, 0.5f);
+        CHECK(host.PlayerCount() == 1 && host.Others().empty(), "the host drops the player who left");
+
+        // Join a port nobody's hosting on: fails after the timeout, without crashing
+        SessionConfig nobody = cc;
+        nobody.port = port + 1;
+        Session lost(SessionMode::Client, world, nobody);
+        for (int i = 0; i < 500 && lost.State() == SessionState::Connecting; i++) Pump(lost, nullptr, DT);
+        CHECK(lost.State() == SessionState::Failed, "joining nobody fails: %s", lost.StatusText().c_str());
+
+        // The host stops: a connected client is told
+        Session again(SessionMode::Client, world, cc);
+        for (int i = 0; i < 300 && again.State() == SessionState::Connecting; i++) Pump(host, &again, DT);
+        CHECK(again.State() == SessionState::Playing, "a client can join again");
+        host.Leave();
+        for (int i = 0; i < 400 && again.State() == SessionState::Playing; i++) Pump(again, nullptr, DT);
+        CHECK(again.State() == SessionState::Ended, "when the host quits, the client returns: %s", again.StatusText().c_str());
+    }
+
+    std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
+    return failures ? 1 : 0;
+}

@@ -47,12 +47,38 @@ struct ShotResult {
     Surface surface = Surface::Plain;
 };
 
+// What the trigger finger (and the rest) wants this frame
+struct WeaponInput {
+    bool fireHeld = false;    // trigger held (automatic weapons keep firing)
+    bool firePressed = false; // pressed this frame
+    bool aim = false;
+    bool reload = false;
+    static WeaponInput FromKeyboardAndMouse();
+};
+
+// The parts of a weapon's state that the host is the authority on (synced to clients)
+struct WeaponState {
+    int ammo = 0;
+    float reloadTimer = 0.0f, reloadDuration = 1.0f;
+    bool emptyReload = false;
+};
+
 // One weapon being carried: ammo, timers, recoil, spread, aiming
 class Weapon {
 public:
     explicit Weapon(const WeaponDef& def, unsigned seed = 1);
 
-    // Reads input (fire, reload, aim) and calls Tick. Returns true if a shot was fired this frame.
+    // One frame from intent: aiming, reloading, firing. Returns true if a shot went
+    // off, with its path (within the spread) in *shot. Says nothing about what it
+    // hit: that's for whoever owns the world (the game simulation).
+    bool Step(float dt, const WeaponInput& in, Stance stance, const Camera3D& camera, Ray* shot);
+    // The shot hit someone: hit marker (bigger if it killed, yellow for the head)
+    void RegisterHit(bool killed, bool headshot);
+    WeaponState GetState() const { return { ammo, reloadTimer, reloadDuration, emptyReload }; }
+    void SetState(const WeaponState& s);
+
+    // Single-player shorthand: reads the keyboard and mouse, Steps, and resolves the shot
+    // against the world and the enemies. Returns true if a shot was fired this frame.
     bool Update(float dt, const Camera3D& camera, World& world, std::vector<Enemy>& enemies, Stance stance);
     // Advances timers, recoil and spread without reading input
     void Tick(float dt, Stance stance);
@@ -65,6 +91,8 @@ public:
     bool TakeDryFire() { bool d = dryFire; dryFire = false; return d; } // clicked on empty?
     // A random bullet path: straight ahead, tilted by up to the current spread
     Ray ShotRay(const Camera3D& camera);
+    // Single-player: what a shot along `ray` hits among the world and enemies (damage applied)
+    ShotResult Resolve(Ray ray, Vector3 shooter, World& world, std::vector<Enemy>& enemies);
 
     // Bullet spread: a cone around the aim direction, set by stance and aiming
     void UpdateSpread(float dt, Stance stance);

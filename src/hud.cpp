@@ -264,41 +264,157 @@ static void Vignette(const State& s) {
 static const char* CONTROLS[][2] = {
     { "WASD", "Move" }, { "MOUSE", "Look" }, { "SPACE", "Jump" }, { "SHIFT", "Sprint" },
     { "CTRL / C", "Crouch" }, { "Q / E", "Lean" }, { "LMB", "Fire" }, { "RMB", "Aim" },
-    { "R", "Reload" }, { "1 / 2 / WHEEL", "Switch weapon" }, { "ENTER", "Respawn at other end" }, { "ESC", "Pause" },
-    { "F3", "Show FPS" },
+    { "R", "Reload" }, { "1 / 2 / WHEEL", "Switch weapon" }, { "TAB", "Scoreboard" }, { "ESC", "Pause" },
+    { "F3", "Show FPS" }, { "ENTER", "Other spawn (offline)" },
 };
 
 static void Controls(float x, float y, float alpha) {
     for (int i = 0; i < (int)(sizeof(CONTROLS) / sizeof(CONTROLS[0])); i++) {
-        float cx = x + (i % 2) * 250.0f, cy = y + (i / 2) * 30.0f;
+        float cx = x + (i % 2) * 250.0f, cy = y + (i / 2) * 27.0f;
         Text(CONTROLS[i][0], cx + 90, cy, 18, ACCENT, RIGHT, alpha);
         Text(CONTROLS[i][1], cx + 104, cy, 18, TEXT, LEFT, alpha);
     }
 }
 
 static Rectangle ButtonRect(const State& s, int i) {
-    return { s.screenW / 2.0f - 120.0f, s.screenH / 2.0f - 30.0f + i * 60.0f, 240.0f, 46.0f };
+    return { s.screenW / 2.0f - 120.0f, s.screenH / 2.0f - 110.0f + i * 58.0f, 240.0f, 46.0f };
 }
 
 int PauseMenuClick(const State& s) {
     if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) return 0;
     Vector2 m = GetMousePosition();
-    for (int i = 0; i < 2; i++) if (CheckCollisionPointRec(m, ButtonRect(s, i))) return i + 1;
+    for (int i = 0; i < 3; i++) if (CheckCollisionPointRec(m, ButtonRect(s, i))) return i + 1;
     return 0;
 }
 
 static void PauseMenu(const State& s) {
     DrawRectangle(0, 0, s.screenW, s.screenH, { 6, 8, 10, 170 });
-    Text("PAUSED", s.screenW / 2.0f, s.screenH / 2.0f - 130.0f, 56, TEXT, CENTER);
-    const char* labels[2] = { "RESUME", "QUIT" };
+    Text("PAUSED", s.screenW / 2.0f, s.screenH / 2.0f - 230.0f, 56, TEXT, CENTER);
+    if (!s.netStatus.empty()) Text(s.netStatus.c_str(), s.screenW / 2.0f, s.screenH / 2.0f - 156.0f, 18, DIM, CENTER);
+    const char* labels[3] = { "RESUME", "LEAVE GAME", "QUIT TO DESKTOP" };
     Vector2 m = GetMousePosition();
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         Rectangle r = ButtonRect(s, i);
         bool hover = CheckCollisionPointRec(m, r);
         DrawRectangleRounded(r, 0.2f, 8, hover ? Color{ 255, 186, 84, 230 } : Color{ 30, 32, 36, 220 });
         Text(labels[i], r.x + r.width / 2, r.y + 11, 24, hover ? Color{ 20, 18, 14, 255 } : TEXT, CENTER);
     }
-    Controls(s.screenW / 2.0f - 250.0f, s.screenH / 2.0f + 110.0f, 0.9f);
+    Controls(s.screenW / 2.0f - 250.0f, s.screenH / 2.0f + 90.0f, 0.9f);
+}
+
+static void Scoreboard(const State& s) {
+    if (!s.scores) return;
+    float w = 560.0f, rowH = 34.0f;
+    float h = 92.0f + rowH * s.scores->size();
+    Rectangle r = { s.screenW / 2.0f - w / 2, s.screenH / 2.0f - h / 2 - 40.0f, w, h };
+    DrawRectangleRounded(r, 0.04f, 8, { 10, 12, 14, 215 });
+    Text("SCOREBOARD", r.x + 24, r.y + 18, 24, TEXT);
+    if (!s.netStatus.empty()) Text(s.netStatus.c_str(), r.x + w - 24, r.y + 22, 15, DIM, RIGHT);
+    float y = r.y + 56;
+    Text("PLAYER", r.x + 24, y, 14, DIM);
+    Text("KILLS", r.x + 340, y, 14, DIM, RIGHT);
+    Text("DEATHS", r.x + 430, y, 14, DIM, RIGHT);
+    Text("PING", r.x + w - 24, y, 14, DIM, RIGHT);
+    y += 26;
+    for (const ScoreRow& row : *s.scores) {
+        if (row.local) DrawRectangleRec({ r.x + 12, y - 5, w - 24, rowH - 4 }, { 255, 186, 84, 40 });
+        Color c = row.alive ? TEXT : DIM;
+        Text(row.name.c_str(), r.x + 24, y, 20, row.local ? ACCENT : c);
+        Text(TextFormat("%d", row.kills), r.x + 340, y, 20, c, RIGHT);
+        Text(TextFormat("%d", row.deaths), r.x + 430, y, 20, c, RIGHT);
+        Text(row.ping > 0 ? TextFormat("%d", row.ping) : "-", r.x + w - 24, y, 20, DIM, RIGHT);
+        y += rowH;
+    }
+}
+
+void Nameplate(Vector2 at, const std::string& name, float alpha) {
+    Vector2 m = Measure(name.c_str(), 16);
+    DrawRectangleRounded({ at.x - m.x / 2 - 8, at.y - 2, m.x + 16, 22 }, 0.4f, 6, { 10, 12, 14, (unsigned char)(140 * alpha) });
+    Text(name.c_str(), at.x, at.y + 1, 16, TEXT, CENTER, alpha);
+}
+
+// --- Main menu ------------------------------------------------------------------------
+
+static bool Button(Rectangle r, const char* label, bool enabled = true, bool primary = false) {
+    Vector2 m = GetMousePosition();
+    bool hover = enabled && CheckCollisionPointRec(m, r);
+    Color fill = !enabled ? Color{ 30, 32, 36, 140 } : (hover ? ACCENT : (primary ? Color{ 70, 56, 36, 230 } : Color{ 30, 32, 36, 220 }));
+    DrawRectangleRounded(r, 0.2f, 8, fill);
+    Text(label, r.x + r.width / 2, r.y + r.height / 2 - 11, 22, hover ? Color{ 20, 18, 14, 255 } : (enabled ? TEXT : DIM), CENTER);
+    return hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+// A one-line text box; click it to type. Returns true when Enter is pressed in it.
+static bool Field(Rectangle r, std::string& value, int id, int& focus, size_t maxLen, bool digits, const char* label) {
+    Text(label, r.x - 14, r.y + 9, 18, DIM, RIGHT);
+    Vector2 m = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, r)) focus = id;
+    bool focused = focus == id;
+    DrawRectangleRounded(r, 0.15f, 6, { 18, 20, 24, 235 });
+    DrawRectangleRoundedLinesEx(r, 0.15f, 6, 1.5f, focused ? ACCENT : Color{ 70, 72, 78, 255 });
+    bool enter = false;
+    if (focused) {
+        for (int c = GetCharPressed(); c > 0; c = GetCharPressed()) {
+            bool ok = digits ? (c >= '0' && c <= '9') : (c >= 32 && c < 127);
+            if (ok && value.size() < maxLen) value.push_back((char)c);
+        }
+        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) && !value.empty()) value.pop_back();
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) enter = true;
+    }
+    std::string shown = value;
+    if (focused && fmodf((float)GetTime(), 1.0f) < 0.55f) shown += "_";
+    Text(shown.c_str(), r.x + 12, r.y + 8, 20, TEXT);
+    return enter;
+}
+
+MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& st) {
+    DrawRectangleGradientV(0, 0, screenW, screenH, { 6, 8, 12, 140 }, { 6, 8, 12, 235 });
+    float cx = screenW / 2.0f;
+    Text("DUSTYARD", cx, 54, 88, TEXT, CENTER);
+    DrawRectangle((int)cx - 150, 148, 300, 3, ACCENT);
+
+    MenuAction action = MenuAction::None;
+    Rectangle panel = { cx - 330, 176, 660, 430 };
+    DrawRectangleRounded(panel, 0.04f, 8, { 10, 12, 14, 190 });
+    float lx = panel.x + 150;   // fields start here (labels to their left)
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) f.focus = -1; // clicking elsewhere drops the focus
+    Field({ lx, panel.y + 24, 260, 38 }, f.name, 0, f.focus, 16, false, "NAME");
+
+    if (st.busy) {
+        Text(st.text.c_str(), cx, panel.y + 150, 24, ACCENT, CENTER, 0.6f + 0.4f * sinf((float)GetTime() * 5.0f));
+        if (Button({ cx - 110, panel.y + 220, 220, 48 }, "CANCEL")) action = MenuAction::Cancel;
+        return action;
+    }
+
+    // Play alone
+    if (Button({ panel.x + 430, panel.y + 20, 200, 46 }, "PLAY OFFLINE")) action = MenuAction::Offline;
+    DrawRectangle((int)panel.x + 24, (int)panel.y + 86, (int)panel.width - 48, 1, { 255, 255, 255, 30 });
+
+    // Host: friends join you
+    Text("HOST A GAME", panel.x + 24, panel.y + 104, 18, ACCENT);
+    Field({ lx, panel.y + 136, 90, 38 }, f.port, 1, f.focus, 5, true, "PORT");
+    Text("BOTS", lx + 150, panel.y + 145, 18, DIM, RIGHT);
+    if (Button({ lx + 160, panel.y + 136, 38, 38 }, "-") && f.bots > 0) f.bots--;
+    Text(TextFormat("%d", f.bots), lx + 216, panel.y + 143, 22, TEXT, CENTER);
+    if (Button({ lx + 234, panel.y + 136, 38, 38 }, "+") && f.bots < 4) f.bots++;
+    if (Button({ panel.x + 430, panel.y + 132, 200, 46 }, "HOST GAME", true, true)) action = MenuAction::Host;
+    DrawRectangle((int)panel.x + 24, (int)panel.y + 198, (int)panel.width - 48, 1, { 255, 255, 255, 30 });
+
+    // Join: someone else's game
+    Text("JOIN A GAME", panel.x + 24, panel.y + 216, 18, ACCENT);
+    bool enter = Field({ lx, panel.y + 248, 260, 38 }, f.address, 2, f.focus, 60, false, "ADDRESS");
+    if (Button({ panel.x + 430, panel.y + 244, 200, 46 }, "JOIN GAME", true, true) || enter) action = MenuAction::Join;
+    Text("Their IP address (or name), and the PORT above", lx, panel.y + 294, 15, DIM);
+    DrawRectangle((int)panel.x + 24, (int)panel.y + 326, (int)panel.width - 48, 1, { 255, 255, 255, 30 });
+
+    if (!st.text.empty()) Text(st.text.c_str(), cx, panel.y + 340, 18, st.error ? DANGER : TEXT, CENTER);
+    if (Button({ cx - 100, panel.y + 370, 200, 44 }, "QUIT")) action = MenuAction::Quit;
+
+    Text("Hosting over the internet: forward UDP port (default 27015) on your router to this PC and allow the game "
+         "through the firewall.", cx, screenH - 64.0f, 15, DIM, CENTER);
+    Text("On the same network, friends join with your LAN address (shown when you host).", cx, screenH - 42.0f, 15, DIM, CENTER);
+    return action;
 }
 
 static void TitleScreen(const State& s) {
@@ -341,6 +457,8 @@ void Draw(const State& s) {
     }
     Score(s);
     if (s.showFps) Text(TextFormat("%d FPS", GetFPS()), 24, 18, 18, { 120, 230, 120, 255 });
+    if (!s.netStatus.empty()) Text(s.netStatus.c_str(), 24, s.showFps ? 40.0f : 18.0f, 15, DIM);
+    if (s.showScores && !s.paused) Scoreboard(s);
     if (s.paused) PauseMenu(s);
 }
 

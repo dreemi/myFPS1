@@ -298,8 +298,10 @@ bool GameAudio::Load(const std::string& assetDir) {
         return false;
     }
     for (Sound& v : gunshotVoices) v = LoadSoundAlias(gunshot);
-    enemyWalk = LoadSoundAlias(walk);
-    enemyRun = LoadSoundAlias(run);
+    for (int i = 0; i < FOOTSTEP_SLOTS; i++) {
+        otherWalk[i] = LoadSoundAlias(walk);
+        otherRun[i] = LoadSoundAlias(run);
+    }
     for (int k = 0; k < (int)Sfx::Count; k++) {
         sfx[k] = MakeSfx((Sfx)k);
         for (Sound& v : sfxVoices[k]) v = LoadSoundAlias(sfx[k]);
@@ -317,7 +319,8 @@ bool GameAudio::Load(const std::string& assetDir) {
 
 void GameAudio::Unload() {
     for (Sound& v : gunshotVoices) if (IsSoundValid(v)) UnloadSoundAlias(v);
-    for (Sound* a : { &enemyWalk, &enemyRun }) if (IsSoundValid(*a)) UnloadSoundAlias(*a);
+    for (int i = 0; i < FOOTSTEP_SLOTS; i++)
+        for (Sound* a : { &otherWalk[i], &otherRun[i] }) if (IsSoundValid(*a)) UnloadSoundAlias(*a);
     for (int k = 0; k < (int)Sfx::Count; k++) {
         for (Sound& v : sfxVoices[k]) if (IsSoundValid(v)) UnloadSoundAlias(v);
         if (IsSoundValid(sfx[k])) UnloadSound(sfx[k]);
@@ -364,12 +367,28 @@ void GameAudio::PlayImpact(Surface surface, Vector3 at, Vector3 ear, Vector3 rig
     PlayAt(s, at, ear, right, 0.9f);
 }
 
-void GameAudio::UpdateEnemyFootsteps(int moving, Vector3 source, Vector3 ear, Vector3 right) {
+void GameAudio::StopFootstepsFrom(int firstSlot) {
     if (!loaded) return;
-    if (moving != 1 && IsSoundPlaying(enemyWalk)) PauseSound(enemyWalk);
-    if (moving != 2 && IsSoundPlaying(enemyRun)) PauseSound(enemyRun);
+    for (int i = firstSlot < 0 ? 0 : firstSlot; i < FOOTSTEP_SLOTS; i++)
+        for (Sound* s : { &otherWalk[i], &otherRun[i] }) if (IsSoundPlaying(*s)) PauseSound(*s);
+}
+
+void GameAudio::PlayRifleShotAt(Vector3 source, Vector3 ear, Vector3 right) {
+    Vector3 to = Vector3Subtract(source, ear);
+    float dist = Vector3Length(to);
+    float volume = 0.9f / (1.0f + dist / 9.0f); // a rifle carries a little further
+    float pan = dist > 0.01f ? Vector3DotProduct(Vector3Scale(to, 1.0f / dist), right) * 0.8f : 0.0f;
+    PlayRifleShot(volume, pan);
+}
+
+void GameAudio::UpdateFootstepsAt(int slot, int moving, Vector3 source, Vector3 ear, Vector3 right) {
+    if (!loaded || slot < 0 || slot >= FOOTSTEP_SLOTS) return;
+    Sound& walkS = otherWalk[slot];
+    Sound& runS = otherRun[slot];
+    if (moving != 1 && IsSoundPlaying(walkS)) PauseSound(walkS);
+    if (moving != 2 && IsSoundPlaying(runS)) PauseSound(runS);
     if (moving == 0) return;
-    Sound& s = moving == 1 ? enemyWalk : enemyRun;
+    Sound& s = moving == 1 ? walkS : runS;
     float volume = 0.9f, pan;
     Spatial(source, ear, right, volume, pan);
     SetSoundVolume(s, volume);

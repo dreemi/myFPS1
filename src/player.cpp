@@ -49,6 +49,45 @@ PlayerInput Player::ReadInput() {
     return in;
 }
 
+void Player::LookAngles(Vector2 delta, float& yawOut, float& pitchOut) const {
+    float sensitivity = mouseSensitivity * camera.fovy / baseFovy; // slower when zoomed
+    yawOut = yaw - delta.x * sensitivity;
+    pitchOut = Clamp(pitch - delta.y * sensitivity, -1.5f, 1.5f);
+}
+
+PlayerState Player::GetState() const {
+    PlayerState s;
+    s.feet = feet;
+    s.yaw = yaw;
+    s.pitch = pitch;
+    s.velocity = velocity;
+    s.velocityY = velocityY;
+    s.airTickTimer = airTickTimer;
+    s.grounded = grounded;
+    s.crouching = crouching;
+    s.leanAmount = leanAmount;
+    s.eyeHeight = currentEyeHeight;
+    s.health = health;
+    s.stance = stance;
+    return s;
+}
+
+void Player::SetState(const PlayerState& s) {
+    feet = s.feet;
+    yaw = s.yaw;
+    pitch = s.pitch;
+    velocity = s.velocity;
+    velocityY = s.velocityY;
+    airTickTimer = s.airTickTimer;
+    grounded = s.grounded;
+    crouching = s.crouching;
+    leanAmount = s.leanAmount;
+    currentEyeHeight = s.eyeHeight;
+    health = s.health;
+    stance = s.stance;
+    UpdateCamera();
+}
+
 void Player::Update(float dt, const World& world) {
     Simulate(dt, ReadInput(), world);
 }
@@ -146,8 +185,13 @@ void Player::Simulate(float dt, const PlayerInput& in, const World& world) {
     // --- Mouse look ---
     float sensitivity = mouseSensitivity * camera.fovy / baseFovy; // slower when zoomed
     float yawBefore = yaw; // air ticks inside this frame see the turn spread over the frame
-    yaw -= in.look.x * sensitivity;
-    pitch -= in.look.y * sensitivity;
+    if (in.hasAim) {
+        yaw = in.aimYaw;
+        pitch = in.aimPitch;
+    } else {
+        yaw -= in.look.x * sensitivity;
+        pitch -= in.look.y * sensitivity;
+    }
     pitch = Clamp(pitch, -1.5f, 1.5f); // just under +/- 90 degrees
 
     // --- Crouching: instant hitbox change, smooth camera ---
@@ -294,6 +338,10 @@ void Player::Simulate(float dt, const PlayerInput& in, const World& world) {
     }
     leanAmount = lean;
 
+    UpdateCamera();
+}
+
+void Player::UpdateCamera() {
     camera.position = Vector3Add(HeadPosition(leanAmount), { 0.0f, stepSmooth, 0.0f });
     camera.target = Vector3Add(camera.position, GetLookDirection());
     float roll = leanRollDegrees * leanAmount * DEG2RAD; // tilt toward the lean

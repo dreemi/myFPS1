@@ -3,6 +3,7 @@
 #include "world.hpp"
 #include "weapon_models.hpp"
 #include "character.hpp"
+#include "game/types.hpp"
 #include <random>
 #include <vector>
 
@@ -72,7 +73,9 @@ public:
 
     bool TakeHit(Vector3 shooterPosition, int damage);  // returns true if the hit killed it
     EnemyRayHit Raycast(Ray ray) const;  // nearest hit on the head or body hitbox
+    EnemyRayHit RaycastAt(Ray ray, Vector3 atFeet) const; // as if it stood at atFeet
     void Draw(CharacterAssets* character) const; // null: placeholder shapes
+    SoldierView View() const;                    // how it looks this frame (drawing, networking)
 
     bool IsAlive() const { return alive; }
     bool IsAlerted() const { return alertTimer > 0.0f; } // has seen the player recently

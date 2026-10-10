@@ -1,5 +1,6 @@
 #pragma once
 #include "raylib.h"
+#include "game/types.hpp"
 #include <string>
 #include <vector>
 
@@ -46,14 +47,38 @@ struct State {
     bool started = true;          // false: title screen
     bool paused = false;
     bool showFps = false;
+    // Multiplayer
+    std::string netStatus;        // top-left line: hosting / connected / offline
+    const std::vector<ScoreRow>* scores = nullptr;
+    bool showScores = false;      // scoreboard (held key)
 };
 
 bool Init();
 void Shutdown();
 void Draw(const State& s);
 
-// Pause menu buttons (screen space); returns 0 none, 1 resume, 2 quit
+// Pause menu buttons (screen space); returns 0 none, 1 resume, 2 leave the game, 3 quit to desktop
 int PauseMenuClick(const State& s);
+
+// A name over another player's head (screen position), fading with distance
+void Nameplate(Vector2 at, const std::string& name, float alpha);
+
+// The main menu: play offline, host a game or join one. Draws and handles the
+// mouse and keyboard itself; the fields are edited in place.
+struct MenuFields {
+    std::string name = "Player";
+    std::string address = "127.0.0.1";
+    std::string port = "27015";
+    int bots = 1;
+    int focus = -1;               // which text field has the keyboard
+};
+enum class MenuAction { None, Offline, Host, Join, Cancel, Quit };
+struct MenuStatus {
+    std::string text;             // what's happening (or what went wrong)
+    bool busy = false;            // connecting: offer Cancel instead of the buttons
+    bool error = false;
+};
+MenuAction MainMenu(int screenW, int screenH, MenuFields& fields, const MenuStatus& status);
 
 Font UiFont();
 

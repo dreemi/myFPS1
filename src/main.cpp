@@ -13,23 +13,86 @@
 #include "render.hpp"
 #include "effects.hpp"
 #include "hud.hpp"
+#include "soldier.hpp"
+#include "game/session.hpp"
 #include "raymath.h"
 #include "rlgl.h"
 #include <algorithm>
+#include <fstream>
+#include <map>
+#include <memory>
 #include <string>
 
 static const int SCREEN_W = 1280;
 static const int SCREEN_H = 720;
 
+// --- Settings remembered between runs (name, last address, port, bots) --------------
+static std::string ConfigPath() { return std::string(GetApplicationDirectory()) + "dustyard.cfg"; }
+
+static void LoadSettings(Hud::MenuFields& f) {
+    std::ifstream in(ConfigPath());
+    std::string key, value;
+    while (in >> key >> value) {
+        if (key == "name") f.name = value;
+        else if (key == "address") f.address = value;
+        else if (key == "port") f.port = value;
+        else if (key == "bots") f.bots = std::clamp(atoi(value.c_str()), 0, 4);
+    }
+}
+
+static void SaveSettings(const Hud::MenuFields& f) {
+    std::ofstream out(ConfigPath());
+    auto safe = [](std::string s) { // one word per value
+        for (char& c : s) if (c == ' ') c = '_';
+        return s.empty() ? std::string("-") : s;
+    };
+    out << "name " << safe(f.name) << "\naddress " << safe(f.address) << "\nport " << safe(f.port) << "\nbots " << f.bots << "\n";
+}
+
+// Presentation state that belongs to one session (reset when a new one starts)
+struct Feel {
+    float hurt = 0.0f;         // recent damage, drives the red screen edges (0..1)
+    float killBanner = 0.0f;   // "ELIMINATED" under the crosshair
+    bool killBannerHeadshot = false;
+    std::vector<Hud::DamageMarker> damageMarkers;
+    std::vector<Hud::FeedEntry> feed;
+    bool wasGrounded = true;   // for the landing sound
+    float lastFallSpeed = 0.0f;
+    float punchPitch = 0.0f, punchYaw = 0.0f; // degrees, camera kick when firing (visual only)
+    float shake = 0.0f;        // when hit
+    float muzzleSmoke = 0.0f, smokeTimer = 0.0f;
+    float bodyPhase = 0.0f;    // stride cycles walked, for your own legs
+    bool wasAlive = true;
+    std::map<uint8_t, std::string> names; // remembered, for players who've left
+    std::map<uint8_t, bool> wasReloading;
+};
+
 int main(int argc, char** argv) {
-    // Debug: "--overview N" renders the map from fixed camera N, saves overview_N.png and exits
+    // Command line: --overview N (debug render), --host [port], --join address[:port],
+    // --offline, --name NAME, --bots N
     int overview = -1;
-    for (int i = 1; i + 1 < argc; i++)
-        if (strcmp(argv[i], "--overview") == 0) overview = atoi(argv[i + 1]);
+    Hud::MenuFields fields;
+    LoadSettings(fields);
+    int autoStart = -1; // a SessionMode to start straight away
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        bool hasNext = i + 1 < argc && argv[i + 1][0] != '-';
+        if (a == "--overview" && hasNext) overview = atoi(argv[++i]);
+        else if (a == "--host") { autoStart = (int)SessionMode::Host; if (hasNext) fields.port = argv[++i]; }
+        else if (a == "--offline") autoStart = (int)SessionMode::Offline;
+        else if (a == "--join" && hasNext) {
+            autoStart = (int)SessionMode::Client;
+            std::string addr = argv[++i];
+            size_t colon = addr.rfind(':');
+            if (colon != std::string::npos) { fields.port = addr.substr(colon + 1); addr = addr.substr(0, colon); }
+            fields.address = addr;
+        } else if (a == "--name" && hasNext) fields.name = argv[++i];
+        else if (a == "--bots" && hasNext) fields.bots = std::clamp(atoi(argv[++i]), 0, 4);
+    }
+
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
     InitWindow(SCREEN_W, SCREEN_H, "Dustyard");
     SetTargetFPS(60);
-    DisableCursor(); // lock + hide the mouse for free-look
     InitAudioDevice();
 
     // Textures and models live in assets/ next to the executable
@@ -38,7 +101,7 @@ int main(int argc, char** argv) {
     LoadWeaponModelAssets(assetDir.c_str());
     GameAudio audio;
     audio.Load(assetDir);
-    CharacterAssets character; // the enemy, your own body, and your first-person arms
+    CharacterAssets character; // everyone's body, your own legs, and your first-person arms
     LoadCharacter(character, assetDir);
 
     World world = BuildTestWorld();
@@ -52,180 +115,255 @@ int main(int argc, char** argv) {
     Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
     SetWeaponModelShader(Render::LitShader());
-    Model spawnPad = LoadModelFromMesh(GenMeshCylinder(1.2f, 0.02f, 32)); // spawn markers
-    Render::ApplyLitShader(spawnPad);
     float sunOnGun = 1.0f; // eases between 0 (player in shade) and 1
     std::vector<SpawnPoint> spawns = GetSpawnPoints();
-    int currentSpawn = GetRandomValue(0, (int)spawns.size() - 1);
 
-    Player player;
-    player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
-    // Two weapons: the FAL (primary) and the revolver. Gameplay in Weapon, how
-    // the player sees each in its view.
-    Weapon rifle(FAL, (unsigned)GetRandomValue(0, 1 << 30));
-    Weapon revolver(REVOLVER, (unsigned)GetRandomValue(0, 1 << 30));
-    RifleView rifleView(FAL_MODELS);
-    ViewModel revolverView(REVOLVER_MODELS);
-    rifleView.arms = revolverView.arms = &character;
-    Weapon* weapons[2] = { &rifle, &revolver };
-    WeaponView* views[2] = { &rifleView, &revolverView };
-    int current = 0, wanted = 0; // in hand, and asked for (switching while they differ)
-    float holster = 0.0f;        // 0 = up, 1 = lowered out of sight
-    float bodyPhase = 0.0f; // stride cycles walked, for your own legs
-
-    std::vector<Enemy> enemies;
-    enemies.emplace_back((unsigned)GetRandomValue(0, 1 << 30));
-    for (Enemy& e : enemies) e.Spawn(player.GetFeet(), world);
-
-    bool started = false;      // title screen until the first click
+    std::unique_ptr<Session> session;
+    std::unique_ptr<RifleView> rifleView;
+    std::unique_ptr<ViewModel> revolverView;
+    Feel feel;
+    Hud::MenuStatus menuStatus;
     bool paused = false;
     bool quit = false;
     bool showFps = false;
     int inputGrace = 0;        // frames to ignore the gun after a menu click
-    int deaths = 0;
-    float hurt = 0.0f;         // recent damage, drives the red screen edges (0..1)
-    float deathTimer = 0.0f;   // > 0 while dead
-    float killBanner = 0.0f;   // "ELIMINATED" under the crosshair
-    bool killBannerHeadshot = false;
-    std::vector<Hud::DamageMarker> damageMarkers;
-    std::vector<Hud::FeedEntry> feed;
-    auto addFeed = [&](const std::string& text, Color color) {
-        feed.insert(feed.begin(), { text, color, 5.0f });
-        if (feed.size() > 4) feed.pop_back();
-    };
-
-    bool wasGrounded = true;   // for the landing sound
-    float lastFallSpeed = 0.0f;
-
-    // Camera feel (visual only: the real aim is never moved)
-    float punchPitch = 0.0f, punchYaw = 0.0f; // degrees, kick when firing
-    float shake = 0.0f;                         // when hit
-    float muzzleSmoke = 0.0f, smokeTimer = 0.0f;   // wisps off the muzzle after a shot
 
     SetExitKey(KEY_NULL); // Esc pauses instead of quitting
-    EnableCursor();       // for the title screen
+    EnableCursor();       // for the menu
 
-    // Respawn at whichever spawn is farther from the enemies
-    auto respawnPlayer = [&]() {
-        float bestDist = -1.0f;
-        for (int i = 0; i < (int)spawns.size(); i++) {
-            float nearest = 1e9f;
-            for (const Enemy& e : enemies)
-                if (e.IsAlive()) nearest = std::min(nearest, Vector3Distance(e.GetFeet(), spawns[i].position));
-            if (nearest > bestDist) { bestDist = nearest; currentSpawn = i; }
+    auto startSession = [&](SessionMode mode) {
+        SessionConfig cfg;
+        cfg.name = fields.name;
+        cfg.address = fields.address;
+        int port = atoi(fields.port.c_str());
+        cfg.port = (uint16_t)(port > 0 && port < 65536 ? port : 27015);
+        fields.port = std::to_string(cfg.port);
+        cfg.bots = fields.bots;
+        SaveSettings(fields);
+        session = std::make_unique<Session>(mode, world, cfg);
+        rifleView = std::make_unique<RifleView>(FAL_MODELS);
+        revolverView = std::make_unique<ViewModel>(REVOLVER_MODELS);
+        rifleView->arms = revolverView->arms = &character;
+        feel = Feel{};
+        Fx::Clear();
+        paused = false;
+        menuStatus = {};
+        if (session->State() == SessionState::Failed) {
+            menuStatus = { session->StatusText(), false, true };
+            session.reset();
+        } else if (session->State() == SessionState::Connecting) {
+            menuStatus = { session->StatusText(), true, false };
         }
-        player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
-        // A fresh life: both guns full, the rifle in hand
-        for (Weapon* w : weapons) w->Reset();
-        current = wanted = 0;
-        holster = 0.0f;
     };
+    auto endSession = [&](const std::string& message, bool error) {
+        if (session) session->Leave();
+        session.reset();
+        audio.StopReload();
+        audio.StopFootstepsFrom(0);
+        menuStatus = { message, false, error };
+        paused = false;
+        EnableCursor();
+    };
+    if (autoStart >= 0 && overview < 0) startSession((SessionMode)autoStart);
 
+    bool inGame = false; // the cursor is captured while playing
     while (!WindowShouldClose() && !quit) {
         float dt = GetFrameTime();
-        Weapon& gun = *weapons[current];
-        WeaponView& viewModel = *views[current];
-
-        // ---------- Menus ----------
         if (IsKeyPressed(KEY_F3)) showFps = !showFps;
-        if (!started) {
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) { started = true; DisableCursor(); inputGrace = 2; }
-        } else {
-            if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_TAB)) {
-                paused = !paused;
-                if (paused) EnableCursor(); else DisableCursor();
-            }
-        }
-        bool playing = started && !paused;
-        if (inputGrace > 0 && playing) inputGrace--;
 
-        // Enter respawns at the next spawn point (the other end of the arena)
-        if (playing && player.IsAlive() && IsKeyPressed(KEY_ENTER)) {
-            currentSpawn = (currentSpawn + 1) % (int)spawns.size();
-            player.Init(spawns[currentSpawn].position, spawns[currentSpawn].yaw);
-            for (Weapon* w : weapons) w->Reset();
+        // ---------- Session lifecycle ----------
+        if (session && session->State() == SessionState::Connecting) {
+            session->Update(dt, LocalInput{});
+            menuStatus.text = session->StatusText();
         }
+        if (session && (session->State() == SessionState::Failed || session->State() == SessionState::Ended)) {
+            endSession(session->StatusText(), session->State() == SessionState::Failed ||
+                                                  session->Mode() == SessionMode::Client);
+        }
+        bool playing = session && session->State() == SessionState::Playing && session->Local();
+        if (playing && !inGame) { DisableCursor(); inGame = true; inputGrace = 2; }
+        if (!playing && inGame) { EnableCursor(); inGame = false; }
+
+        SimPlayer* local = playing ? session->Local() : nullptr;
+        Weapon* gunPtr = local ? &local->Current() : nullptr;
+        WeaponView* viewModel = nullptr;
+        if (local) viewModel = local->current == WEAPON_RIFLE ? (WeaponView*)rifleView.get() : (WeaponView*)revolverView.get();
 
         // ---------- Update ----------
         if (playing) {
-            if (player.IsAlive()) {
-                player.Update(dt, world);
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                paused = !paused;
+                if (paused) EnableCursor(); else DisableCursor();
+            }
+            if (inputGrace > 0 && !paused) inputGrace--;
+            LocalInput in;
+            bool controls = !paused && inputGrace == 0;
+            if (controls) {
+                in.move = Player::ReadInput();
+                in.weapon = WeaponInput::FromKeyboardAndMouse();
+                if (IsKeyPressed(KEY_ONE)) in.switchTo = WEAPON_RIFLE;
+                if (IsKeyPressed(KEY_TWO)) in.switchTo = WEAPON_REVOLVER;
+                if (GetMouseWheelMove() != 0.0f) in.switchTo = 2;
+                in.switchSpawn = IsKeyPressed(KEY_ENTER);
+            }
+            // Offline, pausing stops the world; in a shared game it carries on without you
+            if (!(paused && session->Mode() == SessionMode::Offline)) session->Update(dt, in);
+            if (session->State() != SessionState::Playing) continue; // ended this frame: back to the menu next frame
+            local = session->Local();
+            gunPtr = &local->Current();
+            viewModel = local->current == WEAPON_RIFLE ? (WeaponView*)rifleView.get() : (WeaponView*)revolverView.get();
+        }
 
-                // Switching: 1 / 2 or the mouse wheel. The gun in hand goes down (a reload
-                // in progress is abandoned), then the other comes up.
-                if (inputGrace == 0) {
-                    if (IsKeyPressed(KEY_ONE)) wanted = 0;
-                    if (IsKeyPressed(KEY_TWO)) wanted = 1;
-                    if (GetMouseWheelMove() != 0.0f) wanted = 1 - wanted;
+        // Names, remembered for the kill feed (even after someone leaves)
+        std::vector<ScoreRow> scores;
+        if (session && playing) {
+            scores = session->Scoreboard();
+            for (const ScoreRow& r : scores) feel.names[r.id] = r.name;
+        }
+        auto nameOf = [&](uint8_t id) -> std::string {
+            if (id >= BOT_ID_BASE && id != NO_ID) return "RIVAL";
+            auto it = feel.names.find(id);
+            return it != feel.names.end() ? it->second : std::string("?");
+        };
+        auto findSoldier = [&](uint8_t id) -> const SoldierView* {
+            if (!session) return nullptr;
+            for (const SoldierView& v : session->Others()) if (v.id == id) return &v;
+            for (const SoldierView& v : session->Bots()) if (v.id == id) return &v;
+            return nullptr;
+        };
+
+        Camera3D cam = {};
+        if (local) {
+            cam = local->body.GetCamera();
+            Vector3 off = session->ViewOffset();
+            cam.position = Vector3Add(cam.position, off);
+            cam.target = Vector3Add(cam.target, off);
+        }
+
+        if (playing) {
+            Weapon& gun = *gunPtr;
+            Vector3 ear = cam.position, right = local->body.GetRight();
+            uint8_t me = local->id;
+            auto addFeed = [&](const std::string& text, Color color) {
+                feel.feed.insert(feel.feed.begin(), { text, color, 5.0f });
+                if (feel.feed.size() > 5) feel.feed.pop_back();
+            };
+
+            // What happened: effects, sounds and the HUD
+            for (const GameEvent& e : session->TakeEvents()) {
+                switch (e.type) {
+                case EventType::Shot: {
+                    bool mine = e.actor == me;
+                    Vector3 dir = Vector3Normalize(Vector3Subtract(e.to, e.from));
+                    Vector3 muzzle = e.from;
+                    if (mine) {
+                        muzzle = viewModel->CameraToWorld(viewModel->MuzzleCameraSpace(gun), cam);
+                    } else if (const SoldierView* v = findSoldier(e.actor)) {
+                        muzzle = SoldierMuzzle(&character, *v);
+                    }
+                    if (!e.Is(EVENT_ECHO)) {
+                        // The shot itself: bang, flash, tracer
+                        if (mine) {
+                            if (e.weapon == WEAPON_RIFLE) audio.PlayRifleShot(0.85f, 0.0f);
+                            else audio.PlayGunshot(0.8f, 0.0f);
+                            feel.punchPitch += e.weapon == WEAPON_RIFLE ? Lerp(1.2f, 0.6f, gun.GetAimAmount()) : Lerp(2.4f, 1.1f, gun.GetAimAmount());
+                            feel.punchYaw += GetRandomValue(-100, 100) / 100.0f * 0.5f;
+                            Fx::GunSmoke(muzzle, local->body.GetLookDirection(), 1.0f);
+                            feel.muzzleSmoke = 1.0f;
+                            Fx::Tracer(muzzle, e.to, { 255, 220, 160, 140 });
+                        } else {
+                            if (e.weapon == WEAPON_RIFLE) audio.PlayRifleShotAt(muzzle, ear, right);
+                            else audio.PlayGunshotAt(muzzle, ear, right);
+                            Fx::MuzzleFlash(muzzle, dir);
+                            Fx::Tracer(muzzle, e.to, { 255, 210, 140, 255 });
+                            // A near miss cracks past your head
+                            if (local->Alive() && !(e.hit == HitKind::Player && e.target == me)) {
+                                Vector3 along = Vector3Subtract(e.to, e.from);
+                                float len = Vector3Length(along);
+                                float k = len > 0 ? Clamp(Vector3DotProduct(Vector3Subtract(ear, e.from), along) / (len * len), 0.0f, 1.0f) : 0.0f;
+                                Vector3 closest = Vector3Add(e.from, Vector3Scale(along, k));
+                                float miss = Vector3Distance(ear, closest);
+                                if (miss < 2.0f && k > 0.0f && k < 1.0f) {
+                                    float pan = Vector3DotProduct(Vector3Normalize(Vector3Subtract(closest, ear)), right);
+                                    audio.Play(Sfx::BulletCrack, Lerp(0.9f, 0.35f, miss / 2.0f), pan);
+                                }
+                            }
+                        }
+                    }
+                    if (e.Is(EVENT_PREDICTED)) break; // what it hit comes from the host
+                    // What it hit
+                    if (e.hit == HitKind::World) {
+                        Fx::Impact(e.to, e.normal, (Surface)e.surface);
+                        audio.PlayImpact((Surface)e.surface, e.to, ear, right);
+                    } else if (e.hit == HitKind::Player || e.hit == HitKind::Bot) {
+                        if (!(e.hit == HitKind::Player && e.target == me)) {
+                            Fx::Blood(e.to, dir, e.Is(EVENT_HEADSHOT));
+                            audio.PlayAt(Sfx::FleshHit, e.to, ear, right, 0.9f);
+                        }
+                        if (mine) audio.Play(e.Is(EVENT_HEADSHOT) ? Sfx::Headshot : Sfx::HitTick, 0.7f);
+                    }
+                    break;
                 }
-                if (wanted != current) {
-                    if (gun.IsReloading()) {
-                        gun.CancelReload();
+                case EventType::Hurt:
+                    if (e.target == me) {
+                        audio.Play(Sfx::Hurt, e.Is(EVENT_HEADSHOT) ? 1.0f : 0.8f);
+                        feel.hurt = 1.0f;
+                        feel.shake = e.Is(EVENT_HEADSHOT) ? 1.0f : 0.6f;
+                        // Which way it came from, relative to the way you face
+                        Vector3 from = Vector3Subtract(e.from, local->body.GetFeet());
+                        Vector3 fwd = local->body.GetLookDirection();
+                        fwd.y = 0;
+                        fwd = Vector3Normalize(fwd);
+                        float angle = atan2f(Vector3DotProduct(from, right), Vector3DotProduct(from, fwd));
+                        feel.damageMarkers.push_back({ angle, 1.4f });
+                    }
+                    break;
+                case EventType::Killed: {
+                    const char* weapon = e.weapon == WEAPON_RIFLE ? "FAL" : "REVOLVER";
+                    std::string line = nameOf(e.actor) + "  [" + weapon + "]  " + nameOf(e.target);
+                    if (e.Is(EVENT_HEADSHOT)) line += "  -  HEADSHOT";
+                    Color c = { 236, 236, 230, 255 };
+                    if (e.actor == me) {
+                        c = { 255, 214, 92, 255 };
+                        audio.Play(Sfx::KillConfirm, 0.7f);
+                        feel.killBanner = 1.6f;
+                        feel.killBannerHeadshot = e.Is(EVENT_HEADSHOT);
+                    }
+                    if (e.target == me) {
+                        c = { 232, 72, 58, 255 };
+                        local->body.SetZoom(0.0f);
                         audio.StopReload();
                     }
-                    holster = std::min(1.0f, holster + dt / 0.22f);
-                    if (holster >= 1.0f) {
-                        current = wanted;
-                        audio.Play(Sfx::WeaponDraw, 0.6f);
-                    }
-                } else {
-                    holster = std::max(0.0f, holster - dt / 0.30f);
+                    addFeed(line, c);
+                    break;
                 }
-                for (int i = 0; i < 2; i++) views[i]->holster = i == current ? holster : 1.0f;
+                case EventType::Joined:
+                    if (e.target != me) addFeed(nameOf(e.target) + " joined", { 170, 200, 230, 255 });
+                    break;
+                case EventType::Left:
+                    addFeed(nameOf(e.target) + " left", { 170, 172, 168, 255 });
+                    break;
+                case EventType::Respawned:
+                    break;
+                }
+            }
 
-                bool wasReloading = gun.IsReloading();
-                bool busy = inputGrace > 0 || holster > 0.0f || wanted != current;
-                if (busy) {
-                    gun.UpdateAim(dt, false);
-                    gun.Tick(dt, player.GetStance());
-                }
-                bool fired = busy ? false : gun.Update(dt, player.GetCamera(), world, enemies, player.GetStance());
-                if (fired) {
-                    bool isRifle = &gun == &rifle;
-                    if (isRifle) audio.PlayRifleShot(0.85f, 0.0f);
-                    else audio.PlayGunshot(0.8f, 0.0f);
-                    punchPitch += isRifle ? Lerp(1.2f, 0.6f, gun.GetAimAmount()) : Lerp(2.4f, 1.1f, gun.GetAimAmount());
-                    punchYaw += GetRandomValue(-100, 100) / 100.0f * 0.5f;
-                    // Effects: a tracer and smoke from where the gun's muzzle appears, then whatever it hit
-                    const ShotResult& shot = gun.LastShot();
-                    const Camera3D& c = player.GetCamera();
-                    Vector3 fwd = player.GetLookDirection();
-                    Vector3 gunTip = viewModel.CameraToWorld(viewModel.MuzzleCameraSpace(gun), c);
-                    Vector3 end = shot.hit ? shot.point : Vector3Add(c.position, Vector3Scale(shot.direction, 80.0f));
-                    Fx::Tracer(gunTip, end, { 255, 220, 160, 140 });
-                    Fx::GunSmoke(gunTip, fwd, 1.0f);
-                    muzzleSmoke = 1.0f;
-                    Vector3 ear = c.position, right = player.GetRight();
-                    if (shot.hitEnemy) {
-                        Fx::Blood(shot.point, shot.direction, shot.headshot);
-                        audio.PlayAt(Sfx::FleshHit, shot.point, ear, right, 0.9f);
-                        audio.Play(shot.headshot ? Sfx::Headshot : Sfx::HitTick, 0.7f);
-                    } else if (shot.hit) {
-                        Fx::Impact(shot.point, shot.normal, shot.surface);
-                        audio.PlayImpact(shot.surface, shot.point, ear, right);
-                        if (shot.hitTarget) audio.Play(Sfx::HitTick, 0.5f);
-                    }
-                    if (shot.killed) {
-                        audio.Play(Sfx::KillConfirm, 0.7f);
-                        killBanner = 1.6f;
-                        killBannerHeadshot = shot.headshot;
-                        addFeed(shot.headshot ? "RIVAL ELIMINATED  -  HEADSHOT" : "RIVAL ELIMINATED", { 255, 214, 92, 255 });
-                    }
-                }
-                (void)wasReloading;
-                if (gun.TakeDryFire()) {
+            if (local->Alive()) {
+                if (session->TakeDryFire()) {
                     audio.Play(Sfx::DryFire, 0.8f);
-                    viewModel.DryFire();
+                    viewModel->DryFire();
                 }
                 // Landing thud, louder for longer falls
-                if (player.IsGrounded() && !wasGrounded && lastFallSpeed > 3.0f)
-                    audio.Play(Sfx::Land, Clamp(lastFallSpeed / 9.0f, 0.25f, 0.9f));
-                wasGrounded = player.IsGrounded();
-                lastFallSpeed = -player.GetVerticalVelocity();
-                player.SetZoom(gun.GetAimAmount());
-                viewModel.Update(dt, MotionOf(player), gun, &player.GetCamera());
-                // The revolver's mechanism: reload sounds on their beats, cases dropping into the world
-                ViewModelEvents vmEvents = viewModel.TakeEvents();
+                if (local->body.IsGrounded() && !feel.wasGrounded && feel.lastFallSpeed > 3.0f)
+                    audio.Play(Sfx::Land, Clamp(feel.lastFallSpeed / 9.0f, 0.25f, 0.9f));
+                feel.wasGrounded = local->body.IsGrounded();
+                feel.lastFallSpeed = -local->body.GetVerticalVelocity();
+
+                // The first-person gun: holstering while switching, its mechanism, its sounds
+                rifleView->holster = local->current == WEAPON_RIFLE ? local->holster : 1.0f;
+                revolverView->holster = local->current == WEAPON_REVOLVER ? local->holster : 1.0f;
+                viewModel->Update(dt, MotionOf(local->body), gun, &cam);
+                ViewModelEvents vmEvents = viewModel->TakeEvents();
                 for (ViewSound s : vmEvents.sounds) {
                     switch (s) {
                         case ViewSound::Latch: audio.PlayReloadStep(ReloadStep::Latch); break;
@@ -243,118 +381,88 @@ int main(int argc, char** argv) {
                 }
                 for (const ViewModelEvents::Debris& d : vmEvents.debris) {
                     bool mag = d.kind == DEBRIS_RIFLE_MAG;
-                    Fx::Casing(d.position, Vector3Add(d.velocity, player.GetVelocity()), d.kind,
+                    Fx::Casing(d.position, Vector3Add(d.velocity, local->body.GetVelocity()), d.kind,
                                mag ? 0.0136f : (d.kind == DEBRIS_RIFLE_CASE ? 0.006f : 0.0055f), mag);
                 }
                 // Smoke keeps curling off the muzzle for a moment after a shot
-                if (muzzleSmoke > 0.0f) {
-                    smokeTimer -= dt;
-                    if (smokeTimer <= 0.0f) {
-                        smokeTimer = 0.05f;
-                        Vector3 tip = viewModel.CameraToWorld(viewModel.MuzzleCameraSpace(gun), player.GetCamera());
-                        Fx::GunSmoke(tip, { 0, 1, 0 }, muzzleSmoke * 0.3f);
+                if (feel.muzzleSmoke > 0.0f) {
+                    feel.smokeTimer -= dt;
+                    if (feel.smokeTimer <= 0.0f) {
+                        feel.smokeTimer = 0.05f;
+                        Fx::GunSmoke(viewModel->CameraToWorld(viewModel->MuzzleCameraSpace(gun), cam), { 0, 1, 0 }, feel.muzzleSmoke * 0.3f);
                     }
-                    muzzleSmoke -= dt * 1.1f;
+                    feel.muzzleSmoke -= dt * 1.1f;
                 }
-                Stance st = player.GetStance();
+                Stance st = local->body.GetStance();
                 float stride = st == Stance::Sprinting ? 2.2f : (st == Stance::CrouchMoving ? 1.0f : 1.4f);
-                bodyPhase += player.GetSpeed() * dt / stride;
-            } else {
-                deathTimer -= dt;
-                if (deathTimer <= 0.0f) respawnPlayer();
+                feel.bodyPhase += local->body.GetSpeed() * dt / stride;
+            }
+            feel.wasAlive = local->Alive();
+
+            // Other people's reloads, heard from where they are
+            for (const SoldierView& v : session->Others()) {
+                bool was = feel.wasReloading[v.id];
+                if (v.reloading && !was) audio.PlayAt(Sfx::MagOut, v.feet, ear, right, 0.6f);
+                feel.wasReloading[v.id] = v.reloading;
             }
 
-            // What the enemies can see of the player: real eye position and hitboxes
-            EnemyTarget target;
-            target.feet = player.GetFeet();
-            target.eye = player.GetCamera().position;
-            target.bodyTop = player.GetEyeHeight() - 0.25f;
-            target.alive = player.IsAlive();
-
-            for (Enemy& e : enemies) {
-                e.Update(dt, target, world);
-                for (const Ray& shot : e.TakeShots()) {
-                    audio.PlayGunshotAt(e.GetMuzzle(), player.GetCamera().position, player.GetRight());
-                    ShotTrace t = TraceShotAtPlayer(shot, target, world);
-                    Fx::MuzzleFlash(e.GetMuzzle(), shot.direction);
-                    Fx::Tracer(e.GetMuzzle(), t.end, { 255, 210, 140, 255 });
-                    if (t.hitWorld) {
-                        Fx::Impact(t.end, t.normal, t.surface);
-                        audio.PlayImpact(t.surface, t.end, player.GetCamera().position, player.GetRight());
-                    }
-                    // A near miss cracks past the player's head
-                    if (!t.hitPlayer && player.IsAlive()) {
-                        Vector3 head = player.GetCamera().position;
-                        Vector3 along = Vector3Subtract(t.end, shot.position);
-                        float len = Vector3Length(along);
-                        float k = len > 0 ? Clamp(Vector3DotProduct(Vector3Subtract(head, shot.position), along) / (len * len), 0.0f, 1.0f) : 0.0f;
-                        Vector3 closest = Vector3Add(shot.position, Vector3Scale(along, k));
-                        float miss = Vector3Distance(head, closest);
-                        if (miss < 2.0f && k > 0.0f && k < 1.0f) {
-                            float pan = Vector3DotProduct(Vector3Normalize(Vector3Subtract(closest, head)), player.GetRight());
-                            audio.Play(Sfx::BulletCrack, Lerp(0.9f, 0.35f, miss / 2.0f), pan);
-                        }
-                    }
-                    if (t.hitPlayer && player.IsAlive()) {
-                        audio.Play(Sfx::Hurt, t.headshot ? 1.0f : 0.8f);
-                        hurt = 1.0f;
-                        shake = t.headshot ? 1.0f : 0.6f;
-                        // Which way the shot came from, relative to the way the player faces
-                        Vector3 from = Vector3Subtract(e.GetMuzzle(), player.GetFeet());
-                        Vector3 fwd = player.GetLookDirection();
-                        fwd.y = 0;
-                        fwd = Vector3Normalize(fwd);
-                        float angle = atan2f(Vector3DotProduct(from, player.GetRight()), Vector3DotProduct(from, fwd));
-                        damageMarkers.push_back({ angle, 1.4f });
-                        if (player.TakeDamage(t.headshot ? REVOLVER.headDamage : REVOLVER.bodyDamage)) {
-                            deaths++;
-                            deathTimer = 2.5f;
-                            player.SetZoom(0.0f);
-                            audio.StopReload();
-                            addFeed(t.headshot ? "YOU WERE ELIMINATED  -  HEADSHOT" : "YOU WERE ELIMINATED", { 232, 72, 58, 255 });
-                        }
-                    }
-                }
-            }
             Fx::Update(dt);
             for (const Fx::CasingBounce& b : Fx::TakeCasingBounces()) {
                 bool mag = b.kind == DEBRIS_RIFLE_MAG;
-                audio.PlayAt(mag ? Sfx::MagDrop : Sfx::CasingTink, b.position, player.GetCamera().position, player.GetRight(),
-                             (mag ? 0.4f : 0.25f) + 0.5f * b.strength);
+                audio.PlayAt(mag ? Sfx::MagDrop : Sfx::CasingTink, b.position, ear, right, (mag ? 0.4f : 0.25f) + 0.5f * b.strength);
             }
-            hurt = std::max(0.0f, hurt - dt * 1.2f);
-            shake = std::max(0.0f, shake - dt * 3.0f);
-            killBanner = std::max(0.0f, killBanner - dt);
-            punchPitch -= punchPitch * std::min(1.0f, dt * 11.0f);
-            punchYaw -= punchYaw * std::min(1.0f, dt * 11.0f);
-            for (Hud::DamageMarker& d : damageMarkers) d.life -= dt;
-            damageMarkers.erase(std::remove_if(damageMarkers.begin(), damageMarkers.end(), [](const Hud::DamageMarker& d) { return d.life <= 0; }),
-                                damageMarkers.end());
-            for (Hud::FeedEntry& f : feed) f.life -= dt;
-            feed.erase(std::remove_if(feed.begin(), feed.end(), [](const Hud::FeedEntry& f) { return f.life <= 0; }), feed.end());
-        }
-        for (WorldBox& b : world) b.hitFlash = std::max(0.0f, b.hitFlash - dt);
-        audio.UpdateFootsteps(player.GetStance(), player.IsAlive() && playing);
-        for (const Enemy& e : enemies) {
-            CharAnim a = e.GetAnim();
-            int moving = (!playing || !e.IsAlive()) ? 0 : (a == CharAnim::Run ? 2 : (a == CharAnim::Walk ? 1 : 0));
-            audio.UpdateEnemyFootsteps(moving, e.GetFeet(), player.GetCamera().position, player.GetRight());
+            feel.hurt = std::max(0.0f, feel.hurt - dt * 1.2f);
+            feel.shake = std::max(0.0f, feel.shake - dt * 3.0f);
+            feel.killBanner = std::max(0.0f, feel.killBanner - dt);
+            feel.punchPitch -= feel.punchPitch * std::min(1.0f, dt * 11.0f);
+            feel.punchYaw -= feel.punchYaw * std::min(1.0f, dt * 11.0f);
+            for (Hud::DamageMarker& d : feel.damageMarkers) d.life -= dt;
+            feel.damageMarkers.erase(std::remove_if(feel.damageMarkers.begin(), feel.damageMarkers.end(),
+                                                    [](const Hud::DamageMarker& d) { return d.life <= 0; }),
+                                     feel.damageMarkers.end());
+            for (Hud::FeedEntry& f : feel.feed) f.life -= dt;
+            feel.feed.erase(std::remove_if(feel.feed.begin(), feel.feed.end(), [](const Hud::FeedEntry& f) { return f.life <= 0; }),
+                            feel.feed.end());
+
+            // Footsteps: yours, and everyone else's from where they are
+            audio.UpdateFootsteps(local->body.GetStance(), local->Alive());
+            int slot = 0;
+            auto steps = [&](const SoldierView& v) {
+                int moving = 0;
+                if (v.alive && v.grounded) {
+                    if (v.anim == CharAnim::Run) moving = 2;
+                    else if (v.anim == CharAnim::Walk || (v.bot && v.speed > 0.3f)) moving = 1;
+                }
+                audio.UpdateFootstepsAt(slot++, moving, v.feet, ear, right);
+            };
+            for (const SoldierView& v : session->Others()) steps(v);
+            for (const SoldierView& v : session->Bots()) steps(v);
+            audio.StopFootstepsFrom(slot);
+        } else {
+            audio.UpdateFootsteps(Stance::Still, false);
         }
         audio.Update();
 
         // ---------- Draw ----------
-        // The camera we render from: the player's, plus the visual kick and shake
-        Camera3D cam = player.GetCamera();
-        {
+        if (local) {
+            // The camera we render from: the player's, plus the visual kick and shake
             Vector3 f = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
             Vector3 r = Vector3Normalize(Vector3CrossProduct(f, { 0, 1, 0 }));
-            f = Vector3RotateByAxisAngle(f, r, punchPitch * DEG2RAD);
-            f = Vector3RotateByAxisAngle(f, { 0, 1, 0 }, -punchYaw * DEG2RAD);
-            if (shake > 0.0f) {
-                float k = shake * shake * 0.025f;
+            f = Vector3RotateByAxisAngle(f, r, feel.punchPitch * DEG2RAD);
+            f = Vector3RotateByAxisAngle(f, { 0, 1, 0 }, -feel.punchYaw * DEG2RAD);
+            if (feel.shake > 0.0f) {
+                float k = feel.shake * feel.shake * 0.025f;
                 cam.position = Vector3Add(cam.position, { GetRandomValue(-100, 100) / 100.0f * k, GetRandomValue(-100, 100) / 100.0f * k, 0 });
             }
             cam.target = Vector3Add(cam.position, f);
+        } else {
+            // The menu: a slow flight around the town
+            float a = (float)GetTime() * 0.05f;
+            cam.position = { sinf(a) * 34.0f, 16.0f, cosf(a) * 34.0f };
+            cam.target = { 0, 1.5f, 0 };
+            cam.up = { 0, 1, 0 };
+            cam.fovy = 60.0f;
+            cam.projection = CAMERA_PERSPECTIVE;
         }
         if (overview >= 0) {
             static const Vector3 VIEWS[][2] = {
@@ -370,43 +478,57 @@ int main(int argc, char** argv) {
             cam.target = VIEWS[v][1];
             cam.up = { 0, 1, 0 };
             cam.fovy = v == 0 ? 50.0f : 70.0f;
+            cam.projection = CAMERA_PERSPECTIVE;
         }
 
         // The player's own body (no head or arms: the camera is in the head and the
         // first-person arms are drawn with the gun), so the legs show when looking
         // down. The whole body still casts a shadow.
         auto drawPlayerBody = [&](int parts) {
-            if (player.IsAlive() && character.loaded) {
+            if (local && local->Alive() && character.loaded) {
                 CharAnim anim = CharAnim::Idle;
-                switch (player.GetStance()) {
+                switch (local->body.GetStance()) {
                     case Stance::Walking:      anim = CharAnim::Walk; break;
                     case Stance::Sprinting:    anim = CharAnim::Run; break;
                     case Stance::CrouchStill:  anim = CharAnim::Crouch; break;
                     case Stance::CrouchMoving: anim = CharAnim::CrouchWalk; break;
                     default: break;
                 }
-                Vector3 look = player.GetLookDirection();
+                Vector3 look = local->body.GetLookDirection();
                 float yaw = atan2f(look.x, look.z);
                 // The model's eyes are 14 cm in front of its feet; shift it back so they
                 // sit under the camera, plus a little more to stay out of the collar
-                Vector3 f = { sinf(yaw), 0, cosf(yaw) };
-                Vector3 at = Vector3Subtract(player.GetFeet(), Vector3Scale(f, 0.18f));
+                Vector3 fw = { sinf(yaw), 0, cosf(yaw) };
+                Vector3 at = Vector3Subtract(local->body.GetFeet(), Vector3Scale(fw, 0.18f));
                 Matrix toWorld = MatrixMultiply(MatrixRotateY(yaw), MatrixTranslate(at.x, at.y, at.z));
-                DrawCharacter(character, anim, CharacterFrame(character, anim, bodyPhase), toWorld, parts, WHITE);
+                DrawCharacter(character, anim, CharacterFrame(character, anim, feel.bodyPhase), toWorld, parts, WHITE);
             }
         };
+        auto drawSoldiers = [&]() {
+            if (!session) return;
+            for (const SoldierView& v : session->Others()) DrawSoldier(&character, v);
+            for (const SoldierView& v : session->Bots()) DrawSoldier(&character, v);
+        };
 
-        // Muzzle flashes light up their surroundings
-        Vector3 look = player.GetLookDirection();
-        Render::SetFlashLight(0, Vector3Add(cam.position, Vector3Add(Vector3Scale(look, 0.8f), Vector3Scale(player.GetRight(), 0.15f))),
-                              { 7.0f, 4.5f, 1.8f }, gun.IsMuzzleFlashing() ? 7.0f : 0.0f);
-        Render::SetFlashLight(1, enemies.empty() ? Vector3{} : enemies[0].GetMuzzle(), { 7.0f, 4.5f, 1.8f },
-                              !enemies.empty() && enemies[0].IsMuzzleFlashing() ? 7.0f : 0.0f);
+        // Muzzle flashes light up their surroundings: yours, and the latest of anyone else's
+        if (local) {
+            Vector3 look = local->body.GetLookDirection();
+            Render::SetFlashLight(0, Vector3Add(cam.position, Vector3Add(Vector3Scale(look, 0.8f), Vector3Scale(local->body.GetRight(), 0.15f))),
+                                  { 7.0f, 4.5f, 1.8f }, gunPtr->IsMuzzleFlashing() ? 7.0f : 0.0f);
+        } else {
+            Render::SetFlashLight(0, {}, {}, 0.0f);
+        }
+        Render::SetFlashLight(1, {}, {}, 0.0f);
+        if (session) {
+            for (const auto* list : { &session->Others(), &session->Bots() })
+                for (const SoldierView& v : *list)
+                    if (v.alive && v.muzzleFlash) Render::SetFlashLight(1, SoldierMuzzle(&character, v), { 7.0f, 4.5f, 1.8f }, 7.0f);
+        }
 
         // 1. Shadows from the sun
         Render::BeginShadowPass();
             Render::DrawLevel();
-            for (const Enemy& e : enemies) e.Draw(&character);
+            drawSoldiers();
             drawPlayerBody(PART_ALL & ~PART_HEAD);
         Render::EndShadowPass();
 
@@ -420,9 +542,9 @@ int main(int argc, char** argv) {
                 Render::DrawLevel();
             } else {
                 DrawModel(ground, { 0, 0, 0 }, 1.0f, WHITE);
-                for (const WorldBox& b : world) if (!b.isTarget) DrawWorldBox(b, materials);
+                for (const WorldBox& b : world) DrawWorldBox(b, materials);
             }
-            for (const Enemy& e : enemies) e.Draw(&character);
+            drawSoldiers();
             drawPlayerBody(PART_LEGS);
             for (const SpawnPoint& s : spawns)
                 Fx::DrawGroundMarker(s.position, 1.3f, s.yaw, { s.color.r, s.color.g, s.color.b, 170 });
@@ -433,60 +555,101 @@ int main(int argc, char** argv) {
 
         // 3. First-person weapon: its own pass on top of the world, lit like the
         //    spot the player stands in (darker in shadow)
-        if (player.IsAlive() && started && overview < 0) {
+        if (local && local->Alive() && overview < 0) {
             sunOnGun += ((Render::SunVisible(cam.position, world) ? 1.0f : 0.0f) - sunOnGun) * (1.0f - expf(-8.0f * dt));
             Render::SetViewModelLighting(cam, sunOnGun);
-            Render::SetFlashLight(0, { 0.15f, -0.08f, -0.9f }, { 7.0f, 4.5f, 1.8f }, gun.IsMuzzleFlashing() ? 1.5f : 0.0f);
+            Render::SetFlashLight(0, { 0.15f, -0.08f, -0.9f }, { 7.0f, 4.5f, 1.8f }, gunPtr->IsMuzzleFlashing() ? 1.5f : 0.0f);
             Render::SetFlashLight(1, {}, {}, 0.0f);
-            viewModel.Draw(gun);
+            viewModel->Draw(*gunPtr);
         }
 
-        // Enemy health: a slim bar over the head once it has been hurt
-        for (const Enemy& e : enemies) {
-            if (!e.IsAlive() || e.GetHealth() >= e.GetMaxHealth() || !started) continue;
-            Vector3 top = Vector3Add(e.GetFeet(), { 0, e.GetHeight() + 0.3f, 0 });
-            if (Vector3DotProduct(Vector3Subtract(top, cam.position), player.GetLookDirection()) <= 0.0f) continue; // behind
-            if (!HasLineOfSight(cam.position, top, world)) continue;
-            Vector2 s = GetWorldToScreen(top, cam);
-            const float bw = 54, bh = 5;
-            DrawRectangleRec({ s.x - bw / 2 - 1, s.y - 1, bw + 2, bh + 2 }, { 0, 0, 0, 160 });
-            DrawRectangleRec({ s.x - bw / 2, s.y, bw * e.GetHealth() / e.GetMaxHealth(), bh }, { 232, 72, 58, 255 });
+        if (local && overview < 0) {
+            Vector3 look = local->body.GetLookDirection();
+            auto onScreen = [&](Vector3 p) {
+                return Vector3DotProduct(Vector3Subtract(p, cam.position), look) > 0.0f && HasLineOfSight(cam.position, p, world);
+            };
+            // Bots: a slim health bar over the head once hurt
+            for (const SoldierView& v : session->Bots()) {
+                if (!v.alive || v.health >= v.maxHealth) continue;
+                Vector3 top = Vector3Add(v.feet, { 0, 2.1f, 0 });
+                if (!onScreen(top)) continue;
+                Vector2 s = GetWorldToScreen(top, cam);
+                const float bw = 54, bh = 5;
+                DrawRectangleRec({ s.x - bw / 2 - 1, s.y - 1, bw + 2, bh + 2 }, { 0, 0, 0, 160 });
+                DrawRectangleRec({ s.x - bw / 2, s.y, bw * v.health / v.maxHealth, bh }, { 232, 72, 58, 255 });
+            }
+            // Other players: their names
+            for (const SoldierView& v : session->Others()) {
+                if (!v.alive) continue;
+                Vector3 top = Vector3Add(v.feet, { 0, v.eyeHeight + 0.45f, 0 });
+                if (!onScreen(top)) continue;
+                float dist = Vector3Distance(cam.position, top);
+                Hud::Nameplate(GetWorldToScreen(top, cam), nameOf(v.id), Clamp(1.4f - dist / 40.0f, 0.35f, 1.0f));
+            }
         }
 
         // 4. HUD and menus
-        Hud::State hs;
-        hs.screenW = SCREEN_W;
-        hs.screenH = SCREEN_H;
-        hs.health = player.GetHealth();
-        hs.maxHealth = player.GetMaxHealth();
-        hs.alive = player.IsAlive();
-        hs.deathTimer = deathTimer;
-        hs.hurt = hurt;
-        hs.weapon = current == 0 ? 0 : 1;
-        hs.ammo = gun.GetAmmo();
-        hs.magazine = gun.GetDef().magazineSize;
-        hs.reloading = gun.IsReloading();
-        hs.reloadProgress = gun.GetReloadProgress();
-        hs.spreadPx = tanf(gun.GetSpread() * DEG2RAD) / tanf(player.GetCamera().fovy * 0.5f * DEG2RAD) * (SCREEN_H * 0.5f);
-        hs.recoil = gun.GetRecoil();
-        hs.aim = gun.GetAimAmount();
-        hs.hitMarker = gun.GetHitMarker();
-        hs.hitKilled = gun.LastHitKilled();
-        hs.hitHeadshot = gun.LastHitHeadshot();
-        hs.killBanner = killBanner;
-        hs.killBannerHeadshot = killBannerHeadshot;
-        hs.kills = rifle.GetKills() + revolver.GetKills();
-        hs.deaths = deaths;
-        hs.damage = &damageMarkers;
-        hs.feed = &feed;
-        hs.started = started;
-        hs.paused = paused;
-        hs.showFps = showFps;
-        if (overview < 0) Hud::Draw(hs);
-        if (paused) {
-            int click = Hud::PauseMenuClick(hs);
-            if (click == 1) { paused = false; DisableCursor(); inputGrace = 2; }
-            if (click == 2) quit = true;
+        if (overview < 0) {
+            if (local) {
+                Weapon& gun = *gunPtr;
+                Hud::State hs;
+                hs.screenW = SCREEN_W;
+                hs.screenH = SCREEN_H;
+                hs.health = local->body.GetHealth();
+                hs.maxHealth = local->body.GetMaxHealth();
+                hs.alive = local->Alive();
+                hs.deathTimer = session->RespawnTimer();
+                hs.hurt = feel.hurt;
+                hs.weapon = local->current == WEAPON_RIFLE ? 0 : 1;
+                hs.ammo = gun.GetAmmo();
+                hs.magazine = gun.GetDef().magazineSize;
+                hs.reloading = gun.IsReloading();
+                hs.reloadProgress = gun.GetReloadProgress();
+                hs.spreadPx = tanf(gun.GetSpread() * DEG2RAD) / tanf(local->body.GetCamera().fovy * 0.5f * DEG2RAD) * (SCREEN_H * 0.5f);
+                hs.recoil = gun.GetRecoil();
+                hs.aim = gun.GetAimAmount();
+                hs.hitMarker = gun.GetHitMarker();
+                hs.hitKilled = gun.LastHitKilled();
+                hs.hitHeadshot = gun.LastHitHeadshot();
+                hs.killBanner = feel.killBanner;
+                hs.killBannerHeadshot = feel.killBannerHeadshot;
+                for (const ScoreRow& r : scores)
+                    if (r.local) { hs.kills = r.kills; hs.deaths = r.deaths; }
+                hs.damage = &feel.damageMarkers;
+                hs.feed = &feel.feed;
+                hs.paused = paused;
+                hs.showFps = showFps;
+                hs.scores = &scores;
+                hs.showScores = IsKeyDown(KEY_TAB);
+                if (session->Mode() == SessionMode::Host) {
+                    std::string addrs;
+                    for (const std::string& a : session->Addresses()) addrs += (addrs.empty() ? "" : ", ") + a;
+                    hs.netStatus = "HOSTING  -  port " + std::to_string(session->Port()) + (addrs.empty() ? "" : "  -  LAN " + addrs) +
+                                   "  -  " + std::to_string(session->PlayerCount()) + " playing";
+                } else if (session->Mode() == SessionMode::Client) {
+                    int ping = 0;
+                    for (const ScoreRow& r : scores) if (r.local) ping = r.ping;
+                    hs.netStatus = session->StatusText() + "  -  ping " + std::to_string(ping) + " ms";
+                }
+                Hud::Draw(hs);
+                if (paused) {
+                    int click = Hud::PauseMenuClick(hs);
+                    if (click == 1) { paused = false; DisableCursor(); inputGrace = 2; }
+                    if (click == 2) endSession("", false);
+                    if (click == 3) quit = true;
+                }
+            } else {
+                Hud::MenuAction action = Hud::MainMenu(SCREEN_W, SCREEN_H, fields, menuStatus);
+                switch (action) {
+                    case Hud::MenuAction::Offline: startSession(SessionMode::Offline); break;
+                    case Hud::MenuAction::Host: startSession(SessionMode::Host); break;
+                    case Hud::MenuAction::Join: startSession(SessionMode::Client); break;
+                    case Hud::MenuAction::Cancel: endSession("Cancelled", false); break;
+                    case Hud::MenuAction::Quit: quit = true; break;
+                    default: break;
+                }
+                if (showFps) DrawText(TextFormat("%d FPS", GetFPS()), 24, 18, 18, { 120, 230, 120, 255 });
+            }
         }
 
         EndDrawing();
@@ -497,10 +660,11 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (session) session->Leave();
+    session.reset();
     // Models share the lit shader: give them back the default before unloading
-    for (Model* m : { &spawnPad, &character.model }) Render::DetachLitShader(*m);
+    Render::DetachLitShader(character.model);
     SetWeaponModelShader(Shader{ rlGetShaderIdDefault(), rlGetShaderLocsDefault() });
-    UnloadModel(spawnPad);
     Render::Shutdown();
     Fx::Shutdown();
     Hud::Shutdown();

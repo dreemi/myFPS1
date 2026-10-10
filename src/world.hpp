@@ -36,6 +36,16 @@ constexpr float ARENA_LENGTH = 80.0f;
 
 World BuildTestWorld();
 
+// What a ray hits first: a box or the ground (the ground stops everything)
+struct WorldHit {
+    bool hit = false;
+    float distance = 1e9f;
+    Vector3 point{}, normal{};
+    Surface surface = Surface::Plain;
+    int box = -1;        // index into the world, -1 for the ground
+};
+WorldHit TraceWorld(Ray ray, const World& world, float maxDistance = 1e9f);
+
 // Does an upright cylinder (feet position, radius, height) overlap any box?
 bool CylinderCollides(Vector3 feet, float radius, float height, const World& world);
 // Is the straight line between two points free of walls/cover? (Targets don't block.)

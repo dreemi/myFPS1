@@ -16,6 +16,34 @@ bool CylinderCollides(Vector3 pos, float radius, float height, const World& worl
     return false;
 }
 
+WorldHit TraceWorld(Ray ray, const World& world, float maxDistance) {
+    WorldHit h;
+    h.distance = maxDistance;
+    for (size_t i = 0; i < world.size(); i++) {
+        RayCollision c = GetRayCollisionBox(ray, world[i].Bounds());
+        if (c.hit && c.distance < h.distance) {
+            h.hit = true;
+            h.distance = c.distance;
+            h.point = c.point;
+            h.normal = c.normal;
+            h.surface = world[i].surface;
+            h.box = (int)i;
+        }
+    }
+    if (ray.direction.y < -1e-4f) {
+        float t = -ray.position.y / ray.direction.y;
+        if (t > 0.0f && t < h.distance) {
+            h.hit = true;
+            h.distance = t;
+            h.point = Vector3Add(ray.position, Vector3Scale(ray.direction, t));
+            h.normal = { 0, 1, 0 };
+            h.surface = Surface::Concrete;
+            h.box = -1;
+        }
+    }
+    return h;
+}
+
 bool HasLineOfSight(Vector3 from, Vector3 to, const World& world) {
     Vector3 delta = Vector3Subtract(to, from);
     float dist = Vector3Length(delta);

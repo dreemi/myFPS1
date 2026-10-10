@@ -1,6 +1,7 @@
 #include "enemy.hpp"
 #include "raymath.h"
 #include "rlgl.h"
+#include "soldier.hpp"
 
 static float DistanceXZ(Vector3 a, Vector3 b) {
     return sqrtf((a.x - b.x) * (a.x - b.x) + (a.z - b.z) * (a.z - b.z));
@@ -147,6 +148,15 @@ EnemyRayHit Enemy::Raycast(Ray ray) const {
         result = { true, false, body.distance, body.point };
     }
     return result;
+}
+
+EnemyRayHit Enemy::RaycastAt(Ray ray, Vector3 atFeet) const {
+    // Its hitboxes, moved to where it was (lag compensation)
+    Vector3 shift = Vector3Subtract(atFeet, feet);
+    ray.position = Vector3Subtract(ray.position, shift);
+    EnemyRayHit hit = Raycast(ray);
+    if (hit.hit) hit.point = Vector3Add(hit.point, shift);
+    return hit;
 }
 
 bool Enemy::TakeHit(Vector3 shooterPosition, int damage) {
@@ -386,67 +396,27 @@ CharAnim Enemy::GetAnim() const {
 
 // --- Drawing --------------------------------------------------------------
 
+SoldierView Enemy::View() const {
+    SoldierView v;
+    v.bot = true;
+    v.feet = feet;
+    v.yaw = atan2f(faceDir.x, faceDir.z);
+    v.speed = moveSpeed;
+    v.anim = GetAnim();
+    v.animPhase = animPhase;
+    v.alive = alive;
+    v.deathTime = alive ? 0.0f : respawnDelay - respawnTimer;
+    v.fallDir = recoilDir;
+    v.hitFlash = hitFlash;
+    v.hitReact = hitReact;
+    v.weapon = WEAPON_REVOLVER;
+    v.muzzleFlash = muzzleFlash > 0.0f;
+    v.health = health;
+    v.maxHealth = maxHealth;
+    v.eyeHeight = eyeHeight;
+    return v;
+}
+
 void Enemy::Draw(CharacterAssets* character) const {
-    float yawDeg = atan2f(faceDir.x, faceDir.z) * RAD2DEG;
-    if (!alive && !(character && character->loaded)) return;
-
-    if (character && character->loaded) {
-        // Tip over away from the last shot: a quick flinch when hit, a fall when killed
-        Vector3 axis = Vector3CrossProduct({ 0, 1, 0 }, recoilDir);
-        float tilt = 0.0f, sink = 0.0f;
-        if (alive) {
-            tilt = 9.0f * (hitReact / HIT_REACT_TIME);
-        } else {
-            float t = respawnDelay - respawnTimer;       // seconds since death
-            float fall = fminf(1.0f, t / 0.55f);
-            tilt = 90.0f * fall * fall;                  // accelerate into the ground
-            if (t > 0.55f && t < 0.75f) tilt -= 6.0f * sinf((t - 0.55f) / 0.2f * PI); // small bounce
-            sink = t > 2.0f ? (t - 2.0f) * 1.0f : 0.0f;  // then sink away before respawning
-        }
-        CharAnim anim = alive ? GetAnim() : CharAnim::Rest; // a body lets go of the gun
-        int frame = CharacterFrame(*character, anim, animPhase);
-        Matrix toWorld = MatrixRotateY(yawDeg * DEG2RAD);
-        if (tilt != 0.0f && Vector3LengthSqr(axis) > 1e-6f) toWorld = MatrixMultiply(toWorld, MatrixRotate(Vector3Normalize(axis), tilt * DEG2RAD));
-        toWorld = MatrixMultiply(toWorld, MatrixTranslate(feet.x, feet.y - sink, feet.z));
-        DrawCharacter(*character, anim, frame, toWorld, PART_ALL, hitFlash > 0.0f ? Color{ 255, 150, 150, 255 } : WHITE);
-        if (!alive) return; // dropped the gun
-
-        // The revolver's world model in its right hand (gun origin sits just above the palm)
-        Vector3 palm = Vector3Transform(CharacterGripPoint(*character, anim, frame), toWorld);
-        Vector3 gunOrigin = Vector3Add(palm, { 0, GRIP_ABOVE_PALM, 0 });
-        rlPushMatrix();
-            rlTranslatef(gunOrigin.x, gunOrigin.y, gunOrigin.z);
-            rlRotatef(yawDeg + 180.0f, 0, 1, 0); // gun space has the barrel along -Z
-            weaponModels->drawWorld(muzzleFlash > 0.0f);
-        rlPopMatrix();
-        return;
-    }
-
-    // No character model loaded: simple placeholder shapes
-    Color body = IsAlerted() ? Color{ 200, 60, 200, 255 } : Color{ 140, 70, 180, 255 };
-    if (hitFlash > 0.0f) body = RED;
-
-    Vector3 torso = { feet.x, feet.y + torsoHeight / 2, feet.z };
-    Vector3 torsoSize = { torsoHalfWidth * 2, torsoHeight, torsoHalfWidth * 2 };
-    DrawCubeV(torso, torsoSize, body);
-    DrawCubeWiresV(torso, torsoSize, Fade(BLACK, 0.5f));
-
-    Vector3 head = HeadCenter();
-    DrawSphere(head, headRadius, hitFlash > 0.0f ? RED : Color{ 230, 200, 240, 255 });
-
-    // Eyes face where it's looking
-    Vector3 side = { -faceDir.z, 0.0f, faceDir.x };
-    Vector3 eyeCenter = Vector3Add(head, Vector3Add(Vector3Scale(faceDir, headRadius - 0.03f), { 0, 0.05f, 0 }));
-    DrawSphere(Vector3Add(eyeCenter, Vector3Scale(side, 0.1f)), 0.05f, BLACK);
-    DrawSphere(Vector3Subtract(eyeCenter, Vector3Scale(side, 0.1f)), 0.05f, BLACK);
-
-    // Its pistol: the weapon's world model, held out in its right hand
-    Vector3 hand = HandPosition();
-    rlPushMatrix();
-        rlTranslatef(hand.x, hand.y, hand.z);
-        rlRotatef(yawDeg, 0, 1, 0);   // +Z now points where it faces
-        DrawCube({ 0.0f, -0.05f, -0.30f }, 0.1f, 0.1f, 0.35f, body); // forearm
-        rlRotatef(180.0f, 0, 1, 0);   // gun space has the barrel along -Z
-        weaponModels->drawWorld(muzzleFlash > 0.0f);
-    rlPopMatrix();
+    DrawSoldier(character, View());
 }

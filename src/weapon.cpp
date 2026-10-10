@@ -107,25 +107,60 @@ void Weapon::CancelReload() {
     reloadTimer = 0.0f;
 }
 
-bool Weapon::Update(float dt, const Camera3D& camera, World& world, std::vector<Enemy>& enemies, Stance stance) {
-    UpdateAim(dt, IsMouseButtonDown(MOUSE_BUTTON_RIGHT));
+WeaponInput WeaponInput::FromKeyboardAndMouse() {
+    WeaponInput in;
+    in.fireHeld = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    in.firePressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    in.aim = IsMouseButtonDown(MOUSE_BUTTON_RIGHT);
+    in.reload = IsKeyPressed(KEY_R);
+    return in;
+}
+
+void Weapon::SetState(const WeaponState& s) {
+    ammo = s.ammo;
+    reloadTimer = s.reloadTimer;
+    reloadDuration = s.reloadDuration > 0.0f ? s.reloadDuration : def->reloadTime;
+    emptyReload = s.emptyReload;
+}
+
+void Weapon::RegisterHit(bool killed, bool headshot) {
+    lastHitKilled = killed;
+    lastHitHeadshot = headshot;
+    if (killed) kills++;
+    hitMarker = killed ? 0.3f : 0.12f;
+}
+
+bool Weapon::Step(float dt, const WeaponInput& in, Stance stance, const Camera3D& camera, Ray* shot) {
+    UpdateAim(dt, in.aim);
     Tick(dt, stance);
     if (IsReloading()) return false;
-    if (IsKeyPressed(KEY_R) && StartReload()) return false;
+    if (in.reload && StartReload()) return false;
 
-    bool pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
-    bool trigger = pressed || (def->automatic && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+    bool trigger = in.firePressed || (def->automatic && in.fireHeld);
     if (trigger && cooldownTimer <= 0.0f) {
         if (ammo > 0) {
-            lastShot = Fire(camera, world, enemies);
+            ammo--;
+            cooldownTimer = def->fireCooldown;
+            muzzleFlash = 0.05f;
+            recoil = 1.0f;
+            Ray ray = ShotRay(camera);
+            spread += def->bloomPerShot; // recovers toward the stance's spread over time
+            if (shot) *shot = ray;
             return true;
         }
-        if (pressed) {
+        if (in.firePressed) {
             dryFire = true;
             StartReload(); // auto-reload on empty click
         }
     }
     return false;
+}
+
+bool Weapon::Update(float dt, const Camera3D& camera, World& world, std::vector<Enemy>& enemies, Stance stance) {
+    Ray ray;
+    if (!Step(dt, WeaponInput::FromKeyboardAndMouse(), stance, camera, &ray)) return false;
+    lastShot = Resolve(ray, camera.position, world, enemies);
+    return true;
 }
 
 ShotResult Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>& enemies) {
@@ -136,6 +171,10 @@ ShotResult Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>
 
     Ray ray = ShotRay(camera);
     spread += def->bloomPerShot; // recovers toward the stance's spread over time
+    return Resolve(ray, camera.position, world, enemies);
+}
+
+ShotResult Weapon::Resolve(Ray ray, Vector3 shooter, World& world, std::vector<Enemy>& enemies) {
     ShotResult result;
     result.direction = ray.direction;
 
@@ -176,10 +215,7 @@ ShotResult Weapon::Fire(const Camera3D& camera, World& world, std::vector<Enemy>
         }
     }
     if (hitEnemy) {
-        lastHitKilled = hitEnemy->TakeHit(camera.position, headshot ? def->headDamage : def->bodyDamage);
-        lastHitHeadshot = headshot;
-        if (lastHitKilled) kills++;
-        hitMarker = lastHitKilled ? 0.3f : 0.12f;
+        RegisterHit(hitEnemy->TakeHit(shooter, headshot ? def->headDamage : def->bodyDamage), headshot);
         result.hit = result.hitEnemy = true;
         result.headshot = headshot;
         result.killed = lastHitKilled;

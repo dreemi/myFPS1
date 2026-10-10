@@ -42,8 +42,13 @@ public:
     // Footsteps: walking/running loops while moving on the ground. Crouch-walking
     // plays the walking steps quieter and slower; anything else is silent.
     void UpdateFootsteps(Stance stance, bool alive);
-    // The enemy's footsteps, positioned: moving = 0 none, 1 walk, 2 run
-    void UpdateEnemyFootsteps(int moving, Vector3 source, Vector3 ear, Vector3 right);
+    // Someone else's footsteps (a bot or another player), positioned. slot: one per
+    // character (0..FOOTSTEP_SLOTS-1); moving = 0 none, 1 walk, 2 run
+    static const int FOOTSTEP_SLOTS = 12;
+    void UpdateFootstepsAt(int slot, int moving, Vector3 source, Vector3 ear, Vector3 right);
+    void StopFootstepsFrom(int firstSlot); // silence every slot from firstSlot on
+    // Another player's rifle, heard from where they are
+    void PlayRifleShotAt(Vector3 source, Vector3 ear, Vector3 right);
 
 private:
     static const int GUNSHOT_VOICES = 6; // so rapid/overlapping shots don't cut each other off
@@ -54,7 +59,7 @@ private:
     Sound reloadSteps[(int)ReloadStep::Count]{};
     Sound walk{};
     Sound run{};
-    Sound enemyWalk{}, enemyRun{};      // aliases: their own playback state
+    Sound otherWalk[FOOTSTEP_SLOTS]{}, otherRun[FOOTSTEP_SLOTS]{}; // aliases: their own playback state
     Sound sfx[(int)Sfx::Count]{};
     Sound sfxVoices[(int)Sfx::Count][SFX_VOICES]{};
     int sfxNext[(int)Sfx::Count]{};

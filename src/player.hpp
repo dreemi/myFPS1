@@ -13,10 +13,28 @@ struct PlayerInput {
     bool leanLeft = false;    // held
     bool leanRight = false;   // held
     bool jump = false;        // true on the frame jump was pressed
+    // Absolute view angles (radians) instead of a mouse delta: how networked commands
+    // carry the view, so the look is applied exactly as the player saw it
+    bool hasAim = false;
+    float aimYaw = 0.0f, aimPitch = 0.0f;
 };
 
 // What the player's body is doing; drives weapon accuracy
 enum class Stance { Still, Walking, Sprinting, CrouchStill, CrouchMoving, Airborne };
+
+// Everything that decides where the player goes next: saved and restored for
+// multiplayer prediction (replaying inputs on top of the host's answer)
+struct PlayerState {
+    Vector3 feet{};
+    float yaw = 0.0f, pitch = 0.0f;
+    Vector3 velocity{};
+    float velocityY = 0.0f;
+    float airTickTimer = 0.0f;
+    bool grounded = false, crouching = false;
+    float leanAmount = 0.0f, eyeHeight = 1.7f;
+    int health = 100;
+    Stance stance = Stance::Still;
+};
 
 class Player {
 public:
@@ -25,6 +43,14 @@ public:
     void Simulate(float dt, const PlayerInput& input, const World& world);
 
     static PlayerInput ReadInput();
+    // The view angles a mouse delta would turn to (without applying them)
+    void LookAngles(Vector2 mouseDelta, float& yawOut, float& pitchOut) const;
+    float GetYaw() const { return yaw; }
+    float GetPitch() const { return pitch; }
+
+    PlayerState GetState() const;
+    void SetState(const PlayerState& s);
+    void SetHealth(int h) { health = h; }
 
     const Camera3D& GetCamera() const { return camera; }
     Vector3 GetLookDirection() const;
@@ -57,6 +83,7 @@ private:
     float CeilingAbove(Vector3 pos, const World& world) const;
     void AirAccelerate(Vector3 wishDir, float wishSpeed, float tick);
     Vector3 HeadPosition(float lean) const;
+    void UpdateCamera();
     bool HeadBlocked(float lean, const World& world) const;
 
     Camera3D camera{};

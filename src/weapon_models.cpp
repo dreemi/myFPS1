@@ -450,9 +450,17 @@ void DrawDebris(Matrix transform, int kind) {
     Render::SurfaceObject(0.25f);
 }
 
+// The FAL at rest in someone's hands (other players)
+static void DrawFalWorld(bool muzzleFlash) {
+    (void)muzzleFlash; // the flash is an effect spawned when it fires
+    static const FalPose atRest;
+    DrawFal(atRest);
+    Render::SurfaceObject(0.25f);
+}
+
 WeaponModels FAL_MODELS = {
     nullptr,                         // drawn by the rifle's own view (RifleView)
-    nullptr,
+    DrawFalWorld,
     1.0f,                            // life size
     { 0.10f, -0.19f, -0.10f },       // hip offset (camera space): stock tucked under the arm, close to the chest
     -2.5f,                           // hip yaw
