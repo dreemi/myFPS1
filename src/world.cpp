@@ -206,7 +206,7 @@ struct MapBuilder {
     // A plastered building: a sandstone plinth at the foot, a cornice at the
     // top, and shuttered windows with sills along the upper floor
     void Building(float x0, float x1, float z0, float z1, float h) {
-        Twin(x0, x1, 0, h, z0, z1, Surface::Plaster);
+        Twin(x0, x1, 0, h - 0.05f, z0, z1, Surface::Plaster); // stops inside the cornice (its top isn't the roof's)
         const float p = 0.06f, c = 0.14f;
         Twin(x0 - p, x1 + p, 0, 0.7f, z0 - p, z1 + p, Surface::Sandstone);
         Twin(x0 - c, x1 + c, h - 0.35f, h, z0 - c, z1 + c, Surface::Sandstone);
@@ -219,12 +219,12 @@ struct MapBuilder {
                 for (float side : { -1.0f, 1.0f }) { // two shutter leaves
                     float s0 = mid + side * 0.02f, s1 = mid + side * 0.47f;
                     if (s0 > s1) std::swap(s0, s1);
-                    float f0 = fixed, f1 = fixed + out * 0.06f;
+                    float f0 = fixed + out * 0.004f, f1 = fixed + out * 0.06f; // just off the wall
                     if (f0 > f1) std::swap(f0, f1);
                     if (alongX) Twin(s0, s1, 3.3f, 4.7f, f0, f1, Surface::Painted);
                     else Twin(f0, f1, 3.3f, 4.7f, s0, s1, Surface::Painted);
                 }
-                float g0 = fixed, g1 = fixed + out * 0.14f; // sill
+                float g0 = fixed + out * 0.004f, g1 = fixed + out * 0.14f; // sill
                 if (g0 > g1) std::swap(g0, g1);
                 if (alongX) Twin(mid - 0.6f, mid + 0.6f, 3.15f, 3.3f, g0, g1, Surface::Sandstone);
                 else Twin(g0, g1, 3.15f, 3.3f, mid - 0.6f, mid + 0.6f, Surface::Sandstone);
@@ -265,15 +265,16 @@ World BuildTestWorld() {
     const float outerH = 6.0f; // the town wall: too tall to see or climb over, even from the terrace
 
     // Outer walls (keep these first: tests use the first four as an empty arena)
-    m.Add(-halfW, halfW, 0, outerH, halfL - 0.5f, halfL + 0.5f, Surface::Sandstone);
-    m.Add(-halfW, halfW, 0, outerH, -halfL - 0.5f, -halfL + 0.5f, Surface::Sandstone);
-    m.Add(halfW - 0.5f, halfW + 0.5f, 0, outerH, -halfL, halfL, Surface::Sandstone);
-    m.Add(-halfW - 0.5f, -halfW + 0.5f, 0, outerH, -halfL, halfL, Surface::Sandstone);
+    // (the end walls take the corners; the side walls fit between them, so no two faces share a plane)
+    m.Add(-halfW - 0.5f, halfW + 0.5f, 0, outerH, halfL - 0.5f, halfL + 0.5f, Surface::Sandstone);
+    m.Add(-halfW - 0.5f, halfW + 0.5f, 0, outerH, -halfL - 0.5f, -halfL + 0.5f, Surface::Sandstone);
+    m.Add(halfW - 0.5f, halfW + 0.5f, 0, outerH, -halfL + 0.5f, halfL - 0.5f, Surface::Sandstone);
+    m.Add(-halfW - 0.5f, -halfW + 0.5f, 0, outerH, -halfL + 0.5f, halfL - 0.5f, Surface::Sandstone);
 
     // Sand underfoot along long and out into the plaza's edges (paving elsewhere); thin
     // enough to walk straight onto
-    m.Twin(-19.5f, -12, 0, 0.02f, -30, -8, Surface::Sand);
-    m.Twin(-19.5f, -12, 0, 0.02f, -8, 8, Surface::Sand);
+    m.Twin(-19.45f, -12.05f, 0, 0.02f, -30, -8, Surface::Sand);
+    m.Twin(-19.45f, -12.05f, 0, 0.02f, -8, 8, Surface::Sand);
 
     // --- The blocks between the routes ---
     m.Building(-12, -6, -30, -12, 6.5f);    // between long and mid

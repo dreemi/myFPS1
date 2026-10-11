@@ -3,6 +3,7 @@
 #include "raymath.h"
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 static int failures = 0;
 
@@ -39,6 +40,47 @@ static float RunJump(Player& p, const World& w, PlayerInput held, int doubleJump
     }
     if (airTime) *airTime = frames * dt;
     return peak;
+}
+
+
+// Faces of visible boxes that lie in the same plane, facing the same way, and overlap:
+// the depth buffer can't tell them apart, so they flicker (z-fighting). Returns how
+// many such pairs there are and prints the first few.
+static int CoplanarFaces(const World& w, const char* name) {
+    struct Face { int axis; float at; int dir; float a0, a1, b0, b1; int box; };
+    std::vector<Face> faces;
+    for (int i = 0; i < (int)w.size(); i++) {
+        const WorldBox& b = w[i];
+        if (b.Hidden() || b.isTarget) continue;
+        BoundingBox bb = b.Bounds();
+        float lo[3] = { bb.min.x, bb.min.y, bb.min.z }, hi[3] = { bb.max.x, bb.max.y, bb.max.z };
+        for (int axis = 0; axis < 3; axis++) {
+            int u = (axis + 1) % 3, v = (axis + 2) % 3;
+            for (int dir : { -1, 1 }) {
+                float at = dir < 0 ? lo[axis] : hi[axis];
+                if (axis == 1 && dir < 0 && at < 0.01f) continue; // sitting on the ground: no bottom face
+                faces.push_back({ axis, at, dir, lo[u], hi[u], lo[v], hi[v], i });
+            }
+        }
+    }
+    // The paved ground (Dustyard) is a face too: the plane y = 0, facing up
+    if (!(w.scenery && w.scenery->hasGround)) faces.push_back({ 1, 0.0f, 1, -1e4f, 1e4f, -1e4f, 1e4f, -1 });
+    int count = 0;
+    for (size_t i = 0; i < faces.size(); i++)
+        for (size_t j = i + 1; j < faces.size(); j++) {
+            const Face &a = faces[i], &b = faces[j];
+            if (a.axis != b.axis || a.dir != b.dir || fabsf(a.at - b.at) > 1e-4f) continue;
+            float du = fminf(a.a1, b.a1) - fmaxf(a.a0, b.a0), dv = fminf(a.b1, b.b1) - fmaxf(a.b0, b.b0);
+            if (du <= 1e-4f || dv <= 1e-4f) continue;
+            if (count < 6) {
+                auto where = [&](int k) { return k < 0 ? Vector3{ 0, 0, 0 } : w[k].position; };
+                Vector3 pa = where(a.box), pb = where(b.box);
+                std::printf("    %s: %c%c face at %.3f shared by boxes at (%.2f %.2f %.2f) and (%.2f %.2f %.2f)\n", name,
+                            a.dir > 0 ? '+' : '-', "xyz"[a.axis], a.at, pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
+            }
+            count++;
+        }
+    return count;
 }
 
 int main() {
@@ -901,6 +943,14 @@ int main() {
             CHECK(HasLineOfSight(eye, out, w), "and from it you can see out over the wall");
             CHECK(!HasLineOfSight({ inside.x, 1.7f, inside.z }, out, w), "but not standing in the yard");
         }
+    }
+
+    std::printf("No z-fighting\n");
+    {
+        int r = CoplanarFaces(BuildRedoubt(), "Redoubt");
+        CHECK(r == 0, "Redoubt: no two visible faces share a plane (%d pairs do)", r);
+        int d = CoplanarFaces(BuildTestWorld(), "Dustyard");
+        CHECK(d == 0, "Dustyard: no two visible faces share a plane (%d pairs do)", d);
     }
 
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");

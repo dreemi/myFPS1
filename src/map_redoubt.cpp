@@ -253,8 +253,10 @@ void Fort(Builder& m) {
     for (const Arc& a : arcs) {
         m.Ring(in, out, 0, a.height, a.from, a.to, Surface::Stone);
         if (a.step) {
-            m.Ring(10.6f, in, 0, 0.9f, a.from + 0.02f, a.to - 0.02f, Surface::Stone);
-            m.Ring(9.9f, 10.6f, 0, 0.45f, a.from + 0.03f, a.to - 0.03f, Surface::Stone);
+            // Stepped back a little at openings; continuous where the two halves meet (at h and 3h)
+            auto inset = [&](float angle, float d) { return (fabsf(angle - h) < 1e-4f || fabsf(angle - 3 * h) < 1e-4f) ? 0.0f : d; };
+            m.Ring(10.6f, in, 0, 0.9f, a.from + inset(a.from, 0.02f), a.to - inset(a.to, 0.02f), Surface::Stone);
+            m.Ring(9.9f, 10.6f, 0, 0.45f, a.from + inset(a.from, 0.03f), a.to - inset(a.to, 0.03f), Surface::Stone);
         }
     }
     // Rubble from the breach, and from the gate
@@ -302,12 +304,15 @@ void House(Builder& m) {
     m.Wall(false, x0, x0 + t, z0 + t, z1 - t, floor1, top, { H{ -30.6f, -29.4f, 4.2f, 5.4f } }, Surface::Plaster);
     m.Wall(false, x1 - t, x1, z0 + t, z1 - t, floor1, top, { H{ -31.4f, -30.2f, 4.2f, 5.4f }, H{ -28.6f, -27.4f, 4.2f, 5.4f } }, Surface::Plaster);
     // Timber band and corner posts
-    m.Twin(x0 - 0.06f, x1 + 0.06f, floor1 - 0.22f, floor1, z0 - 0.06f, z0 + 0.1f, Surface::Wood);
-    m.Twin(x0 - 0.06f, x1 + 0.06f, floor1 - 0.22f, floor1, z1 - 0.1f, z1 + 0.06f, Surface::Wood);
-    m.Twin(x0 - 0.06f, x0 + 0.1f, floor1 - 0.22f, floor1, z0, z1, Surface::Wood);
-    m.Twin(x1 - 0.1f, x1 + 0.06f, floor1 - 0.22f, floor1, z0, z1, Surface::Wood);
-    for (float x : { x0 - 0.06f, x1 - 0.14f })
-        for (float z : { z0 - 0.06f, z1 - 0.14f }) m.Twin(x, x + 0.2f, floor1, top, z, z + 0.2f, Surface::Wood);
+    // (no two faces in one plane: the band stands a little proud of the floor line, the side
+    // pieces fit between the end pieces, the posts stand on the band and stop short of the top)
+    const float bandLo = floor1 - 0.23f, bandHi = floor1 + 0.03f;
+    m.Twin(x0 - 0.06f, x1 + 0.06f, bandLo, bandHi, z0 - 0.06f, z0 + 0.1f, Surface::Wood);
+    m.Twin(x0 - 0.06f, x1 + 0.06f, bandLo, bandHi, z1 - 0.1f, z1 + 0.06f, Surface::Wood);
+    m.Twin(x0 - 0.06f, x0 + 0.1f, bandLo, bandHi, z0 + 0.1f, z1 - 0.1f, Surface::Wood);
+    m.Twin(x1 - 0.1f, x1 + 0.06f, bandLo, bandHi, z0 + 0.1f, z1 - 0.1f, Surface::Wood);
+    for (float x : { x0 - 0.07f, x1 - 0.13f })
+        for (float z : { z0 - 0.07f, z1 - 0.13f }) m.Twin(x, x + 0.2f, bandHi, top - 0.04f, z, z + 0.2f, Surface::Wood);
     // Upper floor slab with the stairwell open, and a railing round the stairwell
     const float sx0 = 7.0f, sx1 = 12.4f, sz0 = z0 + t, sz1 = sz0 + 1.25f;
     m.Twin(x0 + t, x1 - t, floor1 - 0.2f, floor1, sz1, z1 - t, Surface::Wood);
@@ -368,10 +373,10 @@ void SpawnCompound(Builder& m) {
     m.Twin(r.x0, r.x1, 0, h, r.z0, r.z0 + t, Surface::Logs);                         // back
     m.Twin(r.x0, -3.0f, 0, h, r.z1 - t, r.z1, Surface::Logs);                        // front, gate in the middle
     m.Twin(3.0f, r.x1, 0, h, r.z1 - t, r.z1, Surface::Logs);
-    m.Twin(r.x0, r.x0 + t, 0, h, r.z0, -112.0f, Surface::Logs);                      // west side, gate
-    m.Twin(r.x0, r.x0 + t, 0, h, -108.5f, r.z1, Surface::Logs);
-    m.Twin(r.x1 - t, r.x1, 0, h, r.z0, -110.0f, Surface::Logs);                      // east side, gate
-    m.Twin(r.x1 - t, r.x1, 0, h, -106.5f, r.z1, Surface::Logs);
+    m.Twin(r.x0, r.x0 + t, 0, h, r.z0 + t, -112.0f, Surface::Logs);                  // west side, gate (between back and front)
+    m.Twin(r.x0, r.x0 + t, 0, h, -108.5f, r.z1 - t, Surface::Logs);
+    m.Twin(r.x1 - t, r.x1, 0, h, r.z0 + t, -110.0f, Surface::Logs);                  // east side, gate
+    m.Twin(r.x1 - t, r.x1, 0, h, -106.5f, r.z1 - t, Surface::Logs);
     for (float x : { -3.3f, 2.7f }) m.Twin(x, x + 0.6f, 0, h + 0.8f, r.z1 - 0.55f, r.z1 + 0.05f, Surface::Logs); // gate posts
     // Cabins
     for (Rect c : { Rect{ -9.5f, -5.0f, -119.0f, -114.5f }, Rect{ 5.0f, 9.5f, -119.0f, -115.0f } }) {
@@ -455,7 +460,7 @@ void Tower(Builder& m) {
     B(-deckOver, deckOver, platform, platform + 1.05f, deckOver - 0.1f, deckOver, Surface::Wood);
     B(-deckOver, -deckOver + 0.1f, platform, platform + 1.05f, -deckOver + 0.1f, deckOver - 0.1f, Surface::Wood);
     B(deckOver - 0.1f, deckOver, platform, platform + 1.05f, -deckOver + 0.1f, deckOver - 0.1f, Surface::Wood);
-    B(coreH, inH, platform - 0.3f + 0.01f, platform + 0.9f, -inH - 0.08f, -inH, Surface::Wood); // railing at the stairwell's far end
+    B(coreH + 0.02f, inH - 0.02f, platform, platform + 0.9f, -inH - 0.08f, -inH, Surface::Wood); // railing at the stairwell's far end
     const float roofBase = platform + 2.6f;
     B(-deckOver, deckOver, roofBase, roofBase + 0.15f, -deckOver, deckOver, Surface::Wood, BOX_HIDDEN);
     m.Roof({ cx - deckOver - 0.5f, cx + deckOver + 0.5f, cz - deckOver - 0.5f, cz + deckOver + 0.5f }, roofBase, 1.8f,
@@ -513,8 +518,9 @@ void Boundary(Builder& m) {
     }
     for (float z : { -HALF_L + e, HALF_L - e }) {
         for (float x = -HALF_W + 2; x < HALF_W - 1; x += 4.0f) m.Add(x - 0.08f, x + 0.08f, 0, 1.2f, z - 0.08f, z + 0.08f, Surface::Wood);
-        m.Add(-HALF_W, HALF_W, 0.5f, 0.6f, z - 0.04f, z + 0.04f, Surface::Wood);
-        m.Add(-HALF_W, HALF_W, 1.0f, 1.1f, z - 0.04f, z + 0.04f, Surface::Wood);
+        const float in = HALF_W - e - 0.04f; // up to the side rails' inner faces
+        m.Add(-in, in, 0.5f, 0.6f, z - 0.04f, z + 0.04f, Surface::Wood);
+        m.Add(-in, in, 1.0f, 1.1f, z - 0.04f, z + 0.04f, Surface::Wood);
     }
 }
 
