@@ -32,7 +32,7 @@ The name, address, port, bots, map and class you last used are saved in `dustyar
 Pick one in the main menu before you play. Both carry the revolver as a sidearm.
 
 - **Standard**: the FN FAL, automatic, 20 rounds. Three body shots or one to the head.
-- **Sniper**: the Enfield L42A1, a bolt-action 7.62 rifle with a 10-round magazine and a telescope. One shot kills. Aimed all the way, you look through the telescope (about four times magnification, a pointed post and side bars). After each shot your eye comes off it while you work the bolt (about a second: handle up, back, the case flies out, forward, down). From the hip it's wild. The reload opens the bolt, changes the magazine and closes the bolt again.
+- **Sniper**: the Enfield L42A1, a bolt-action 7.62 rifle with a 10-round magazine and a telescope. A shot to the body does 75 damage; a shot to the head kills from any side, helmet or not. Aimed all the way, you look through the telescope (about four times magnification, a pointed post and side bars). After each shot your eye comes off it while you work the bolt (about a second: handle up, back, the case flies out, forward, down). From the hip it's wild. The reload opens the bolt, changes the magazine and closes the bolt again.
 
 ## Maps
 
@@ -73,7 +73,7 @@ Some connections can't accept incoming traffic, whatever you forward. These incl
 
 ## Helmets
 
-Everyone, players and bots, wears a steel helmet. A shot to the **back** of the head glances off: the helmet flies off, the wearer takes no damage, and the HUD shows **NO HELMET** until the next respawn. A shot to the head from any other direction goes straight through it and counts as a normal headshot.
+Everyone, players and bots, wears a steel helmet. A shot to the **back** of the head glances off: the helmet flies off, the wearer takes no damage, and the HUD shows **NO HELMET** until the next respawn. A shot to the head from any other direction goes straight through it and counts as a normal headshot. The L42A1 goes through a helmet from any side.
 
 ## Controls
 

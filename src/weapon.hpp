@@ -36,7 +36,7 @@ struct WeaponDef {
 // Enemies have 100 health.
 extern const WeaponDef REVOLVER; // 4 body shots or 2 headshots
 extern const WeaponDef FAL;      // 3 body shots or 1 headshot, automatic
-extern const WeaponDef L42A1;    // 1 shot, bolt action, telescope
+extern const WeaponDef L42A1;    // 2 body shots or 1 headshot (through a helmet), bolt action, telescope
 const WeaponDef& WeaponDefOf(int weapon); // WEAPON_RIFLE, WEAPON_REVOLVER or WEAPON_SNIPER
 
 // What one shot hit (for effects and sounds; damage is already applied)

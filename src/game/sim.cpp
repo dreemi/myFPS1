@@ -371,8 +371,9 @@ void GameSim::ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTim
     shot.surface = (uint8_t)wall.surface;
     if (headshot) shot.flags |= EVENT_HEADSHOT;
 
-    // A helmet stops one shot from behind; from anywhere else it's no help
-    if (headshot && (kind == HitKind::Player || kind == HitKind::Bot)) {
+    // A helmet stops one shot from behind; from anywhere else it's no help, and the L42A1 goes
+    // straight through it from any side
+    if (headshot && weapon != WEAPON_SNIPER && (kind == HitKind::Player || kind == HitKind::Bot)) {
         bool deflected = false;
         if (kind == HitKind::Player) {
             SimPlayer* victim = Find(target);

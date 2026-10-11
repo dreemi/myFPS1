@@ -192,7 +192,7 @@ int main() {
         for (int i = 0; i < 40; i++) { sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, BTN_AIM, sim.Time())); sim.Update(DT); }
         CHECK(a->rifle.IsScoped() && fabsf(a->body.GetCamera().fovy - L42A1.scopeFovy) < 0.01f,
               "aimed, it's through the telescope (field of view %.1f)", a->body.GetCamera().fovy);
-        // One shot to the body kills; holding the trigger doesn't fire again until the bolt's worked
+        // A shot to the body takes 75; holding the trigger doesn't fire again until the bolt's worked
         int shots = 0, kills = 0;
         bool sniperShot = false;
         float aimDuringBolt = 1.0f;
@@ -206,12 +206,43 @@ int main() {
                 if (e.type == EventType::Killed && e.actor == a->id && e.target == b->id && e.weapon == WEAPON_SNIPER) kills++;
             }
         }
-        CHECK(kills == 1, "one body shot kills");
+        CHECK(kills == 0 && b->body.GetHealth() == 25, "a body shot does 75 (health left %d)", b->body.GetHealth());
         CHECK(shots == 1 && sniperShot, "a second shot waits for the bolt (%d shot%s in a second)", shots, shots == 1 ? "" : "s");
         CHECK(aimDuringBolt < 0.1f, "working the bolt takes the eye off the telescope (aim %.2f)", aimDuringBolt);
         CHECK(!a->rifle.IsReloading(), "a reload asked for mid-bolt waits...");
         for (int i = 0; i < 20; i++) { sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, 0, sim.Time())); sim.Update(DT); }
         CHECK(a->rifle.IsReloading(), "...and starts once the bolt's closed");
+
+        // A shot to the head kills, even from behind through a helmet (which stays on: it didn't stop it)
+        {
+            GameSim hs(world, 0, 2);
+            SimPlayer* s = hs.AddPlayer("S", CLASS_SNIPER);
+            SimPlayer* v = hs.AddPlayer("V");
+            PlayerState ss = s->body.GetState(), vs = v->body.GetState();
+            ss.feet = { 0, 0, -9 };
+            vs.feet = { 0, 0, 9 };
+            s->body.SetState(ss);
+            for (float yaw0 : { 0.0f, PI / 2, PI, -PI / 2 }) {   // V faces away from S (down +Z)
+                vs.yaw = yaw0;
+                v->body.SetState(vs);
+                if (v->body.GetLookDirection().z > 0.9f) break;
+            }
+            hs.Update(DT);
+            float hy, hp;
+            LookAt(*s, v->body.GetCamera().position, hy, hp);
+            uint32_t q = 1;
+            for (int i = 0; i < 40; i++) { hs.ApplyCommand(s->id, Command(q++, hy, hp, BTN_AIM, hs.Time())); hs.Update(DT); }
+            bool headKill = false, helmetOff = false;
+            for (int i = 0; i < 5; i++) {
+                hs.ApplyCommand(s->id, Command(q++, hy, hp, BTN_AIM | (i == 0 ? BTN_FIRE | BTN_FIRE_PRESSED : 0), hs.Time()));
+                hs.Update(DT);
+                for (const GameEvent& e : hs.TakeEvents()) {
+                    if (e.type == EventType::Killed && e.target == v->id && e.Is(EVENT_HEADSHOT)) headKill = true;
+                    if (e.type == EventType::HelmetOff) helmetOff = true;
+                }
+            }
+            CHECK(headKill && !helmetOff, "a head shot from behind kills straight through the helmet");
+        }
 
         // On the wire: the class in the hello, the rifle in snapshots and events
         Proto::Hello h{ Proto::VERSION, "S", CLASS_SNIPER }, hb;

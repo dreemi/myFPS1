@@ -28,7 +28,7 @@ const WeaponDef FAL = {
 
 const WeaponDef L42A1 = {
     "L42A1",
-    100, 200,        // 7.62 NATO from a heavy barrel: one shot
+    75, 200,         // 7.62 NATO from a heavy barrel: two to the body, one to the head (helmet or not)
     1.15f,           // the bolt: lifted, drawn back, pushed home and turned down between shots
     10, 3.4f,        // 10-round magazine: bolt open, magazine changed, bolt closed
     13.0f, 11.0f, 7.0f, 3.5f, 4.5f, 2.5f, // wild from the hip
