@@ -305,6 +305,23 @@ static void PauseMenu(const State& s) {
     Controls(s.screenW / 2.0f - 250.0f, s.screenH / 2.0f + 90.0f, 0.9f);
 }
 
+// King of the hill: a banner at the top centre saying who holds the hill
+static void HillBanner(const State& s) {
+    if (!s.hill.active) return;
+    float cx = s.screenW / 2.0f, y = 18.0f;
+    const char* line;
+    Color c;
+    if (s.hill.contested && s.onHill) { line = "THE HILL IS CONTESTED"; c = { 255, 186, 84, 255 }; }
+    else if (s.hillYou) { line = "YOU HOLD THE HILL"; c = { 120, 220, 120, 255 }; }
+    else if (s.hill.contested) { line = "THE HILL IS CONTESTED"; c = { 220, 200, 160, 255 }; }
+    else if (s.hill.holder != NO_ID) { line = TextFormat("%s HOLDS THE HILL", s.hillHolder.c_str()); c = { 232, 110, 90, 255 }; }
+    else { line = "THE HILL IS EMPTY"; c = { 200, 200, 196, 255 }; }
+    Vector2 m = Measure(line, 18);
+    DrawRectangleRounded({ cx - m.x / 2 - 16, y - 6, m.x + 32, 52 }, 0.25f, 6, { 10, 12, 14, 170 });
+    Text(line, cx, y, 18, c, CENTER);
+    Text(TextFormat("your time on the hill: %d", s.hillScore), cx, y + 24, 14, DIM, CENTER);
+}
+
 static void Scoreboard(const State& s) {
     if (!s.scores) return;
     float w = 560.0f, rowH = 34.0f;
@@ -315,6 +332,7 @@ static void Scoreboard(const State& s) {
     if (!s.netStatus.empty()) Text(s.netStatus.c_str(), r.x + w - 24, r.y + 22, 15, DIM, RIGHT);
     float y = r.y + 56;
     Text("PLAYER", r.x + 24, y, 14, DIM);
+    if (s.hill.active) Text("HILL", r.x + 250, y, 14, ACCENT, RIGHT);
     Text("KILLS", r.x + 340, y, 14, DIM, RIGHT);
     Text("DEATHS", r.x + 430, y, 14, DIM, RIGHT);
     Text("PING", r.x + w - 24, y, 14, DIM, RIGHT);
@@ -323,6 +341,7 @@ static void Scoreboard(const State& s) {
         if (row.local) DrawRectangleRec({ r.x + 12, y - 5, w - 24, rowH - 4 }, { 255, 186, 84, 40 });
         Color c = row.alive ? TEXT : DIM;
         Text(row.name.c_str(), r.x + 24, y, 20, row.local ? ACCENT : c);
+        if (s.hill.active) Text(TextFormat("%d", row.hill), r.x + 250, y, 20, row.local ? ACCENT : c, RIGHT);
         Text(TextFormat("%d", row.kills), r.x + 340, y, 20, c, RIGHT);
         Text(TextFormat("%d", row.deaths), r.x + 430, y, 20, c, RIGHT);
         Text(row.bot ? "BOT" : (row.ping > 0 ? TextFormat("%d", row.ping) : "-"), r.x + w - 24, y, 20, DIM, RIGHT);
@@ -392,13 +411,14 @@ MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& s
 
     // The map (for hosting and offline; joining plays the host's)
     static const char* BLURBS[] = { "Woods, farmland flanks and a stone fort in the middle. Big: 240 m.",
-                                    "A sun-baked town: three lanes and a plaza. Small and quick." };
+                                    "A sun-baked town: three lanes and a plaza. Small and quick.",
+                                    "Scanned old houses round a king-of-the-hill plaza. 160 m." };
     const int maps = (int)MapId::Count;
     Text("MAP", lx - 14, panel.y + 87, 18, DIM, RIGHT);
     if (Button({ lx, panel.y + 78, 38, 38 }, "<")) { f.map = (f.map + maps - 1) % maps; action = MenuAction::MapChanged; }
     Text(MapName((MapId)f.map), lx + 111, panel.y + 85, 24, TEXT, CENTER);
     if (Button({ lx + 184, panel.y + 78, 38, 38 }, ">")) { f.map = (f.map + 1) % maps; action = MenuAction::MapChanged; }
-    Text(BLURBS[f.map % 2], lx, panel.y + 119, 14, DIM);
+    Text(BLURBS[f.map % (int)MapId::Count], lx, panel.y + 119, 14, DIM);
 
     // Play alone
     if (Button({ panel.x + 430, panel.y + 20, 200, 46 }, "PLAY OFFLINE")) action = MenuAction::Offline;
@@ -470,8 +490,10 @@ void Draw(const State& s) {
         DeathScreen(s);
     }
     Score(s);
-    if (s.showFps) Text(TextFormat("%d FPS", GetFPS()), 24, 18, 18, { 120, 230, 120, 255 });
+    if (s.showFps) Text(TextFormat("%d FPS   %.1f %.1f %.1f", GetFPS(), s.position.x, s.position.y, s.position.z), 24, 18, 18,
+                        { 120, 230, 120, 255 });
     if (!s.netStatus.empty()) Text(s.netStatus.c_str(), 24, s.showFps ? 40.0f : 18.0f, 15, DIM);
+    if (!s.paused) HillBanner(s);
     if (s.showScores && !s.paused) Scoreboard(s);
     if (s.paused) PauseMenu(s);
 }

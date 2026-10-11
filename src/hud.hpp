@@ -51,6 +51,12 @@ struct State {
     // Multiplayer
     std::string netStatus;        // top-left line: hosting / connected / offline
     const std::vector<ScoreRow>* scores = nullptr;
+    HillState hill;               // king of the hill
+    bool hillYou = false;         // the local player holds it
+    std::string hillHolder;       // who holds it (name)
+    int hillScore = 0;            // the local player's seconds on the hill
+    bool onHill = false;          // the local player is standing in it
+    Vector3 position{};           // where the local player stands (shown with the FPS counter)
     bool showScores = false;      // scoreboard (held key)
 };
 

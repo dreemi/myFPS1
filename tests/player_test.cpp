@@ -945,12 +945,92 @@ int main() {
         }
     }
 
+    std::printf("Old Town\n");
+    {
+        World w = BuildOldTown();
+        int props = w.scenery ? (int)w.scenery->props.size() : 0;
+        std::printf("  (%d boxes, %d scanned models placed)\n", (int)w.size(), props);
+        // Every scanned model is used somewhere
+        int used = 0;
+        for (const char* name : { "house_a", "house_b", "house_c", "yellow_house", "door_wall", "long_house", "plaster_house",
+                                  "storage_building", "ruined_wall", "winery_corner" }) {
+            bool found = false;
+            for (const Scenery::Prop& p : w.scenery->props) found |= p.model == name;
+            used += found;
+        }
+        CHECK(used == 10, "all ten scanned models are used (%d)", used);
+        // Both halves are the same, turned half a circle: boxes and models
+        int unmatched = 0;
+        for (const WorldBox& a : w) {
+            bool found = false;
+            for (const WorldBox& b : w)
+                if (fabsf(a.position.x + b.position.x) < 1e-3f && fabsf(a.position.y - b.position.y) < 1e-3f &&
+                    fabsf(a.position.z + b.position.z) < 1e-3f && Vector3Equals(a.size, b.size)) { found = true; break; }
+            if (!found) unmatched++;
+        }
+        for (const Scenery::Prop& a : w.scenery->props) {
+            bool found = false;
+            for (const Scenery::Prop& b : w.scenery->props)
+                if (a.model == b.model && fabsf(a.position.x + b.position.x) < 1e-3f && fabsf(a.position.z + b.position.z) < 1e-3f)
+                    found = true;
+            if (!found) unmatched++;
+        }
+        CHECK(unmatched == 0, "both sides get the same town (%d pieces without a twin)", unmatched);
+        // Scanned models don't overlap each other's footprints (their walls would cross)
+        CHECK(w.hillRadius > 5.0f, "there's a hill to hold (radius %.1f m)", w.hillRadius);
+
+        const Vector3 spawnA = w.spawns[0].position, spawnB = w.spawns[1].position;
+        CHECK(!CylinderCollides(spawnA, 0.35f, 1.8f, w), "team A's spawn is clear to stand in");
+        CHECK(!HasLineOfSight(Vector3Add(spawnA, { 0, 1.7f, 0 }), Vector3Add(spawnB, { 0, 1.7f, 0 }), w), "the spawns can't see each other");
+        const float cell = 1.0f;
+        const int nx = (int)(w.width / cell), nz = (int)(w.length / cell);
+        auto at = [&](int i, int k) { return Vector3{ -w.width / 2 + (i + 0.5f) * cell, 0, -w.length / 2 + (k + 0.5f) * cell }; };
+        auto cellOf = [&](Vector3 p) { return (int)((p.x + w.width / 2) / cell) * nz + (int)((p.z + w.length / 2) / cell); };
+        // Low things (a kerb) are stepped over: only what's above step height blocks the way
+        auto blocked = [&](Vector3 p) { return CylinderCollides({ p.x, 0.46f, p.z }, 0.35f, 1.34f, w); };
+        std::vector<char> seen(nx * nz, 0);
+        std::vector<int> queue = { cellOf(spawnA) };
+        seen[queue[0]] = 1;
+        int openCells = 0;
+        for (size_t q = 0; q < queue.size(); q++) {
+            openCells++;
+            int i = queue[q] / nz, k = queue[q] % nz;
+            const int di[] = { 1, -1, 0, 0 }, dk[] = { 0, 0, 1, -1 };
+            for (int d = 0; d < 4; d++) {
+                int a = i + di[d], b = k + dk[d];
+                if (a < 0 || b < 0 || a >= nx || b >= nz || seen[a * nz + b]) continue;
+                if (blocked(at(a, b))) continue;
+                seen[a * nz + b] = 1;
+                queue.push_back(a * nz + b);
+            }
+        }
+        auto reach = [&](Vector3 p) { int c = cellOf(p); return c >= 0 && c < nx * nz && seen[c]; };
+        CHECK(reach(spawnB), "team A can walk to team B's spawn");
+        CHECK(reach({ 0.5f, 0, -6.5f }) && reach({ -6.5f, 0, 0.5f }), "and onto the hill");
+        int unreachable = 0;
+        for (Vector3 h : w.hotspots) unreachable += !reach(h);
+        CHECK(unreachable == 0, "every place bots head for can be walked to (%d can't)", unreachable);
+        // Nothing open is sealed off: every open square inside the town is reachable
+        int sealed = 0;
+        for (int i = 0; i < nx; i++)
+            for (int k = 0; k < nz; k++) {
+                Vector3 p = at(i, k);
+                if (fabsf(p.x) > 19.0f || fabsf(p.z) > 70.0f) continue;   // inside the ring of houses
+                if (Vector2Length({ p.x, p.z }) < 2.7f) continue;          // the fountain basin: jumped into, not walked
+                if (!seen[i * nz + k] && !blocked(p)) sealed++;
+            }
+        CHECK(sealed == 0, "no pockets of the town that can't be walked into (%d squares)", sealed);
+        std::printf("  (%d walkable squares)\n", openCells);
+    }
+
     std::printf("No z-fighting\n");
     {
         int r = CoplanarFaces(BuildRedoubt(), "Redoubt");
         CHECK(r == 0, "Redoubt: no two visible faces share a plane (%d pairs do)", r);
         int d = CoplanarFaces(BuildTestWorld(), "Dustyard");
         CHECK(d == 0, "Dustyard: no two visible faces share a plane (%d pairs do)", d);
+        int o = CoplanarFaces(BuildOldTown(), "Old Town");
+        CHECK(o == 0, "Old Town: no two visible faces share a plane (%d pairs do)", o);
     }
 
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");

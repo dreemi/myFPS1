@@ -49,7 +49,7 @@ struct SpawnPoint {
 };
 
 // The maps
-enum class MapId : uint8_t { Redoubt, Dustyard, Count };
+enum class MapId : uint8_t { Redoubt, Dustyard, OldTown, Count };
 const char* MapName(MapId id);
 
 // Things that are drawn but aren't boxes (their collision, where they have any,
@@ -87,8 +87,17 @@ struct Scenery {
         Surface surface;
         bool round;            // a log rather than a sawn beam
     };
+    // A model from assets/models/scans (a scanned building or wall), placed in the world.
+    // Its collision is boxes in the world; the model is only drawn.
+    struct Prop {
+        std::string model;     // file name without .glb
+        Vector3 position;      // where its origin goes (the foot of a facade, the middle of an object's base)
+        float yaw;             // radians, turning its +Z (a facade's face) toward (sin yaw, 0, cos yaw)
+        float scale = 1.0f;
+    };
     std::vector<Tree> trees;
     std::vector<Ring> rings;
+    std::vector<Prop> props;
     std::vector<Roof> roofs;
     std::vector<Beam> beams;
 
@@ -125,6 +134,9 @@ struct World : std::vector<WorldBox> {
     Surface ground = Surface::Concrete;   // what bullets hitting the ground hit
     float fogDensity = 0.006f;
     float botSight = 30.0f;               // how far bots notice people on this map
+    // King of the hill: whoever stands in this circle alone scores (radius 0: no hill)
+    Vector3 hillCenter{};
+    float hillRadius = 0.0f;
     std::shared_ptr<const Scenery> scenery;
 
     // Calls fn(index) once for each box whose footprint may overlap [x0,x1] x [z0,z1]
@@ -147,6 +159,7 @@ constexpr float ARENA_LENGTH = 80.0f;
 World BuildMap(MapId id);
 World BuildTestWorld();                    // Dustyard
 World BuildRedoubt();
+World BuildOldTown();
 std::vector<SpawnPoint> GetSpawnPoints();  // Dustyard's
 
 // What a ray hits first: a box or the ground (the ground stops everything)

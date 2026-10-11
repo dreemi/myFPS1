@@ -95,4 +95,12 @@ struct ScoreRow {
     int kills = 0, deaths = 0, ping = 0;
     bool local = false, alive = true;
     bool bot = false;
+    int hill = 0;              // seconds held the hill (king of the hill maps)
+};
+
+// The hill right now (king of the hill maps)
+struct HillState {
+    bool active = false;       // this map has a hill
+    uint8_t holder = NO_ID;    // who's alone on it (player id or BOT_ID_BASE + bot), NO_ID if nobody or contested
+    bool contested = false;    // more than one on it
 };

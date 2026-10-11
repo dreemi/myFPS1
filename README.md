@@ -1,6 +1,6 @@
 # Dustyard
 
-A raylib (C++) FPS: an FN FAL and a revolver, AI opponents, and two maps: **Redoubt**, a long woodland battlefield with a stone fort in the middle, and **Dustyard**, a small sun-baked town. Play offline, or host a game for up to 8 players over LAN or the internet.
+A raylib (C++) FPS: an FN FAL and a revolver, AI opponents, and three maps: **Redoubt**, a long woodland battlefield with a stone fort in the middle; **Old Town**, an old quarter built from photogrammetry scans round a King of the Hill plaza; and **Dustyard**, a small sun-baked town. Play offline, or host a game for up to 8 players over LAN or the internet.
 
 ## Build
 
@@ -23,7 +23,7 @@ From the command line:
 
     fps.exe --host [port] --bots 2 --name Ann --map redoubt
     fps.exe --join 192.168.1.20:27015 --name Bob
-    fps.exe --offline --map dustyard
+    fps.exe --offline --map oldtown
 
 The name, address, port, bots and map you last used are saved in `dustyard.cfg` next to the exe.
 
@@ -38,6 +38,14 @@ Long and wide: team A spawns in a log palisade at one end, team B at the other, 
 - **The farmland flanks**: wide, open, plowed fields along both long edges. They're fast and exposed, with a rail fence and a few hay bales. A log **checkpoint hut** with sandbags and a barrier sits where each flank meets the middle.
 - **The houses**: a two-storey stone house for each team near the middle, with doors toward the woods and the fort, windows on both floors, and stairs inside.
 - **The lookout towers**: a stair tower in each team's back corner. The stairs wind up inside a closed log shaft, so you're safe on the way up, to an open lookout 15 m up, above the treetops. From there you can see the other tower across the whole map and straight down the tree-free lane along your edge of the map. It's far from the action, but safe.
+
+### Old Town (161 × 54 m)
+
+A walled-in old quarter built entirely from photogrammetry scans of real buildings (`assets/models/scans`), round a **King of the Hill** plaza. Team A spawns in a yard in one corner and team B in the opposite one; both halves are the same, turned half a circle.
+
+- **The hill**: a paved circle in the middle, marked by a low stone kerb, with a fountain basin and a plinth for cover. Standing in it **alone** scores a second of hill time for every second; two or more in it and it's contested, so nobody scores. A banner at the top of the screen says who holds it, and the scoreboard ranks everyone by time on the hill.
+- **The streets**: rows of old houses all round the edge, an L-shaped block of houses on each side, a storage building flanking the plaza, a damaged plaster house standing out of each long row, a junk-filled nook in a ruined room, and a ruined wall out in the open.
+- The buildings are shells with no insides; invisible boxes stop people and bullets.
 
 ### Dustyard (40 × 80 m)
 
@@ -86,6 +94,7 @@ Everyone, players and bots, wears a steel helmet. A shot to the **back** of the 
 - `src/main.cpp`: menu, game loop, presentation of events, render passes
 - `src/world.*`: the map container (boxes plus size, spawns, scenery), a grid that speeds up collision and line-of-sight queries, Dustyard
 - `src/map_redoubt.cpp`: Redoubt: its layout, trees, roads and the painted ground
+- `src/map_oldtown.cpp`: Old Town: where each scanned building stands, its collision, the hill
 - `src/scenery_mesh.*`: meshes for what isn't boxes (trees, the fort's curved walls, roofs, beams)
 - `src/game/session.*`: a game being played (offline, hosted or joined): host and client logic, prediction, reconciliation, interpolation
 - `src/game/sim.*`: the authoritative simulation (players, bots, shots, damage, respawns, lag compensation); no rendering or networking
@@ -101,5 +110,6 @@ Everyone, players and bots, wears a steel helmet. A shot to the **back** of the 
 - `src/player.*`, `weapon.*`, `enemy.*`, `weapon_models.*`, `character.*`: gameplay and models
 - `tests/`: headless tests. `net_test` runs a real host and client over loopback. `player_test` checks both maps: Redoubt is symmetric, everything is reachable on foot, and a simulated player climbs the tower and the house stairs.
 - `tools/make_textures.py`: generates the textures (run with Blender's Python).
+- `tools/scan_facade.py`, `scan_object.py`, `scan_repack.py`, `scan_colliders.py`: turn photogrammetry scans into game models (see `assets/models/scans/README.md`).
 
 For performance checks, `fps.exe --offline --map redoubt --bots 4 --bench` prints the average and worst frame time over 300 frames with vsync off.

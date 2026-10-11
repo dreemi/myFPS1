@@ -78,26 +78,35 @@ std::string Session::NameOf(uint8_t id) const {
     return "?";
 }
 
+HillState Session::Hill() const {
+    if (sim) return sim->Hill();
+    return snapshots.empty() ? HillState{} : snapshots.back().hill;
+}
+
 std::vector<ScoreRow> Session::Scoreboard() const {
     std::vector<ScoreRow> rows;
     if (sim) {
         for (const auto& p : sim->Players())
-            rows.push_back({ p->id, p->name, p->kills, p->deaths, p->ping, p->id == localId, p->Alive() });
+            rows.push_back({ p->id, p->name, p->kills, p->deaths, p->ping, p->id == localId, p->Alive(), false, (int)p->hillTime });
         for (int i = 0; i < (int)sim->Bots().size(); i++) {
             uint8_t id = (uint8_t)(BOT_ID_BASE + i);
-            rows.push_back({ id, BotName(id), sim->BotKills(i), sim->BotDeaths(i), 0, false, sim->Bots()[i].IsAlive(), true });
+            rows.push_back({ id, BotName(id), sim->BotKills(i), sim->BotDeaths(i), 0, false, sim->Bots()[i].IsAlive(), true,
+                             (int)sim->BotHill(i) });
         }
     } else if (!snapshots.empty()) {
         const Snapshot& s = snapshots.back();
         for (const Snapshot::PlayerEntry& p : s.players)
-            rows.push_back({ p.view.id, NameOf(p.view.id), p.kills, p.deaths, p.ping, p.view.id == localId, p.view.alive });
+            rows.push_back({ p.view.id, NameOf(p.view.id), p.kills, p.deaths, p.ping, p.view.id == localId, p.view.alive, false, p.hill });
         for (size_t i = 0; i < s.bots.size(); i++) {
             uint8_t id = (uint8_t)(BOT_ID_BASE + s.bots[i].id);
             Snapshot::BotScore sc = i < s.botScores.size() ? s.botScores[i] : Snapshot::BotScore{};
-            rows.push_back({ id, BotName(id), sc.kills, sc.deaths, 0, false, s.bots[i].alive, true });
+            rows.push_back({ id, BotName(id), sc.kills, sc.deaths, 0, false, s.bots[i].alive, true, sc.hill });
         }
     }
-    std::sort(rows.begin(), rows.end(), [](const ScoreRow& a, const ScoreRow& b) {
+    // On a king of the hill map, time on the hill ranks first
+    bool koth = Hill().active;
+    std::sort(rows.begin(), rows.end(), [koth](const ScoreRow& a, const ScoreRow& b) {
+        if (koth && a.hill != b.hill) return a.hill > b.hill;
         return a.kills != b.kills ? a.kills > b.kills : a.deaths < b.deaths;
     });
     return rows;
@@ -249,12 +258,13 @@ Snapshot Session::BuildSnapshot(const SimPlayer& forPlayer) const {
     o.holster = forPlayer.holster;
     o.respawnTimer = forPlayer.respawnTimer;
     o.helmet = forPlayer.helmet;
-    for (const auto& p : sim->Players()) s.players.push_back({ p->View(), p->kills, p->deaths, p->ping });
+    for (const auto& p : sim->Players()) s.players.push_back({ p->View(), p->kills, p->deaths, p->ping, (int)p->hillTime });
+    s.hill = sim->Hill();
     for (int i = 0; i < (int)sim->Bots().size(); i++) {
         SoldierView v = sim->BotView(i);
         v.id = (uint8_t)i;
         s.bots.push_back(v);
-        s.botScores.push_back({ sim->BotKills(i), sim->BotDeaths(i) });
+        s.botScores.push_back({ sim->BotKills(i), sim->BotDeaths(i), (int)sim->BotHill(i) });
     }
     return s;
 }

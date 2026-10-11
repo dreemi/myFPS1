@@ -9,12 +9,17 @@ const char* MapName(MapId id) {
     switch (id) {
         case MapId::Redoubt: return "REDOUBT";
         case MapId::Dustyard: return "DUSTYARD";
+        case MapId::OldTown: return "OLDTOWN";
         default: return "?";
     }
 }
 
 World BuildMap(MapId id) {
-    return id == MapId::Dustyard ? BuildTestWorld() : BuildRedoubt();
+    switch (id) {
+        case MapId::Dustyard: return BuildTestWorld();
+        case MapId::OldTown: return BuildOldTown();
+        default: return BuildRedoubt();
+    }
 }
 
 // --- The grid ---------------------------------------------------------------------

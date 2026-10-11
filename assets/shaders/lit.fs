@@ -26,6 +26,7 @@ uniform float specular;       // highlight strength for this surface
 // Physically based objects (materialMode = 1): metal/roughness, optional maps
 uniform int materialMode;     // 0 = simple (characters), 1 = PBR (weapons, casings), 2 = terrain
 uniform float alphaCut;       // > 0: pixels less opaque than this are cut out (leaves)
+uniform int twoSided;         // 1: back faces are lit as the side being seen (one-sided scans)
 
 // Terrain (materialMode = 2): texture0 grass, texture1 dirt, texture2 plowed field,
 // texture3 forest floor, all tiled in world space; texture4 says which goes where
@@ -122,6 +123,7 @@ vec3 SpecularGGX(vec3 N, vec3 V, vec3 L, vec3 f0, float rough)
 void main()
 {
     vec3 n = normalize(fragNormal);
+    if (twoSided == 1 && !gl_FrontFacing) n = -n;
     vec2 uv = fragTexCoord;
     vec3 N = n;
     float rough = 0.7;

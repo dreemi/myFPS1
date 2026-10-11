@@ -68,6 +68,7 @@ public:
     const std::vector<SoldierView>& Others() const { return others; } // other players, ready to draw
     const std::vector<SoldierView>& Bots() const { return botViews; }
     std::vector<ScoreRow> Scoreboard() const;
+    HillState Hill() const;     // king of the hill: who holds it now
     std::string NameOf(uint8_t id) const;
     int PlayerCount() const;
 

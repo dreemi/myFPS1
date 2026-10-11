@@ -31,6 +31,7 @@ struct SimPlayer {
     float hitFlash = 0.0f, hitReact = 0.0f;
     float animPhase = 0.0f;    // stride cycles (third-person animation)
     bool helmet = true;        // stops one shot to the back of the head
+    float hillTime = 0.0f;     // seconds alone on the hill
     int ping = 0;
 
     // Host bookkeeping for a remote player's commands
@@ -71,6 +72,8 @@ public:
     SoldierView BotView(int index) const;          // with its id (BOT_ID_BASE + index) and helmet
     int BotKills(int index) const { return botKills[index]; }
     int BotDeaths(int index) const { return botDeaths[index]; }
+    float BotHill(int index) const { return botHill[index]; }
+    HillState Hill() const { return hill; }
 
     // A remote player's command: checked and queued, run on the next Update
     void QueueCommand(uint8_t id, const PlayerCommand& cmd);
@@ -120,6 +123,9 @@ private:
     std::vector<uint8_t> botTarget;  // who each bot is fighting (a player id or BOT_ID_BASE + index)
     std::vector<bool> botHelmet, botWasAlive;
     std::vector<int> botKills, botDeaths;
+    std::vector<float> botHill;
+    HillState hill;
+    void UpdateHill(float dt);
     std::deque<HistoryFrame> history;
     std::vector<GameEvent> events;
     std::vector<SpawnPoint> spawns;

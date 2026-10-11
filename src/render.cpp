@@ -44,6 +44,12 @@ static float fogDensity = FOG_DENSITY;
 static bool inShadowPass = false;
 static bool shadowFollows = false;   // big maps: the shadow map covers the area round the camera
 static float shadowExtent = 96.0f;
+static std::string assets;                 // where models are loaded from
+// Scanned models placed in the level: each file loaded once, drawn wherever it stands
+struct PropModel { std::string name; Model model; };
+struct PropDraw { int model; Matrix transform; BoundingBox bounds; };
+static std::vector<PropModel> propModels;
+static std::vector<PropDraw> props;
 // GPU skinning: the bone attributes are only switched on while a character is drawn
 // (raylib would otherwise bind bone buffers for every mesh, and most have none)
 static int boneIdsLoc = -1, boneWeightsLoc = -1, boneMatricesLoc = -1;
@@ -70,6 +76,7 @@ static RenderTexture2D LoadDepthTarget(int size) {
 }
 
 bool Init(const std::string& assetDir) {
+    assets = assetDir;
     std::string dir = assetDir + "shaders/";
     lit = LoadShader((dir + "lit.vs").c_str(), (dir + "lit.fs").c_str());
     sky = LoadShader(nullptr, (dir + "sky.fs").c_str());
@@ -88,6 +95,7 @@ bool Init(const std::string& assetDir) {
     boneMatricesLoc = lit.locs[SHADER_LOC_BONE_MATRICES];
     lit.locs[SHADER_LOC_VERTEX_BONEIDS] = lit.locs[SHADER_LOC_VERTEX_BONEWEIGHTS] = lit.locs[SHADER_LOC_BONE_MATRICES] = -1;
     SetInt(lit, "skinned", 0);
+    SetInt(lit, "twoSided", 0);
     shadowMap = LoadDepthTarget(SHADOW_SIZE);
     SetFloat(lit, "shadowTexel", 1.0f / SHADOW_SIZE);
     for (int i = 0; i < 2; i++) SetFlashLight(i, { 0, 0, 0 }, { 0, 0, 0 }, 0.0f);
@@ -108,6 +116,12 @@ static void UnloadKeepTextures(Model& m) {
 static void ClearLevel() {
     for (LevelPart& p : level) UnloadKeepTextures(p.model);
     level.clear();
+    for (PropModel& m : propModels) {
+        DetachLitShader(m.model);
+        UnloadModel(m.model);
+    }
+    propModels.clear();
+    props.clear();
     if (groundMask.id) UnloadTexture(groundMask);
     groundMask = Texture2D{};
 }
@@ -168,7 +182,7 @@ static void AddQuad(std::vector<float>& v, std::vector<float>& n, std::vector<fl
 }
 
 static Model BuildModel(const std::vector<const WorldBox*>& boxes, bool withGround, Texture2D albedo, Texture2D rough,
-                        Texture2D normal) {
+                        Texture2D normal, float groundHalfW = ARENA_WIDTH / 2, float groundHalfL = ARENA_LENGTH / 2) {
     std::vector<float> v, n, uv;
     std::vector<unsigned short> idx;
     struct Face { Vector3 n, r, u; };
@@ -191,7 +205,7 @@ static Model BuildModel(const std::vector<const WorldBox*>& boxes, bool withGrou
         }
     }
     if (withGround) {
-        float hw = ARENA_WIDTH / 2, hl = ARENA_LENGTH / 2;
+        float hw = groundHalfW, hl = groundHalfL;
         Vector3 c[4] = { { -hw, 0, hl }, { hw, 0, hl }, { hw, 0, -hl }, { -hw, 0, -hl } };
         AddQuad(v, n, uv, idx, c, { 0, 1, 0 });
     }
@@ -273,7 +287,10 @@ void BuildLevel(const World& world, const WorldMaterials& mat) {
         bool ground = (Surface)s == Surface::Concrete && !paintedGround; // a paved ground (Dustyard)
         if (boxes.empty() && !ground) continue;
         const SurfaceLook& look = mat.Of((Surface)s);
-        level.push_back({ BuildModel(boxes, ground, look.albedo, look.rough, look.normal), look, LevelPart::Boxes });
+        // The ground reaches well past the edges of maps whose edges are open to view
+        float gw = world.map == MapId::Dustyard ? world.width / 2 : world.width / 2 + 150.0f;
+        float gl = world.map == MapId::Dustyard ? world.length / 2 : world.length / 2 + 150.0f;
+        level.push_back({ BuildModel(boxes, ground, look.albedo, look.rough, look.normal, gw, gl), look, LevelPart::Boxes });
     }
     if (sc) {
         SceneryMeshes meshes = BuildSceneryMeshes(*sc);
@@ -285,6 +302,43 @@ void BuildLevel(const World& world, const WorldMaterials& mat) {
         for (SceneryMeshes::Piece& p : meshes.leaves)
             level.push_back({ WrapMesh(p.mesh, mat.leaves, Texture2D{}, Texture2D{}), SurfaceLook{}, LevelPart::Leaves, p.bounds, p.background });
         if (paintedGround) BuildTerrain(sc->ground, mat);
+        // Scanned models
+        for (const Scenery::Prop& p : sc->props) {
+            int index = -1;
+            for (int i = 0; i < (int)propModels.size(); i++)
+                if (propModels[i].name == p.model) index = i;
+            if (index < 0) {
+                Model m = LoadModel((assets + "models/scans/" + p.model + ".glb").c_str());
+                if (m.meshCount == 0) {
+                    TraceLog(LOG_WARNING, "RENDER: scan model %s missing", p.model.c_str());
+                    continue;
+                }
+                for (int k = 0; k < m.materialCount; k++)
+                    for (int map : { MATERIAL_MAP_ALBEDO, MATERIAL_MAP_NORMAL }) {
+                        Texture2D& t = m.materials[k].maps[map].texture;
+                        if (t.id == 0 || t.id == rlGetTextureIdDefault()) continue;
+                        GenTextureMipmaps(&t);
+                        SetTextureFilter(t, TEXTURE_FILTER_TRILINEAR);
+                        SetTextureFilter(t, TEXTURE_FILTER_ANISOTROPIC_8X);
+                    }
+                ApplyLitShader(m);
+                propModels.push_back({ p.model, m });
+                index = (int)propModels.size() - 1;
+            }
+            Matrix xf = MatrixMultiply(MatrixMultiply(MatrixScale(p.scale, p.scale, p.scale), MatrixRotateY(p.yaw)),
+                                       MatrixTranslate(p.position.x, p.position.y, p.position.z));
+            xf = MatrixMultiply(propModels[index].model.transform, xf);
+            // World bounds: the model's box, turned and moved
+            BoundingBox mb = GetModelBoundingBox(propModels[index].model);
+            BoundingBox wb = { { 1e9f, 1e9f, 1e9f }, { -1e9f, -1e9f, -1e9f } };
+            for (int c = 0; c < 8; c++) {
+                Vector3 corner = { c & 1 ? mb.max.x : mb.min.x, c & 2 ? mb.max.y : mb.min.y, c & 4 ? mb.max.z : mb.min.z };
+                Vector3 w = Vector3Transform(corner, xf);
+                wb.min = Vector3Min(wb.min, w);
+                wb.max = Vector3Max(wb.max, w);
+            }
+            props.push_back({ index, xf, wb });
+        }
     }
 }
 
@@ -359,6 +413,20 @@ void DrawLevel() {
                 break;
             }
         }
+    }
+    // Scanned models: one-sided scans (a facade has no back), so drawn from both sides
+    if (!props.empty()) {
+        SurfacePbr(0.0f, 0.9f, false, true, 1.0f);
+        SetInt(lit, "twoSided", 1);
+        rlDisableBackfaceCulling();
+        for (const PropDraw& p : props) {
+            if (!InView(p.bounds, cullVP)) continue;
+            const Model& m = propModels[p.model].model;
+            for (int i = 0; i < m.meshCount; i++) DrawMesh(m.meshes[i], m.materials[m.meshMaterial[i]], p.transform);
+        }
+        rlDrawRenderBatchActive();
+        rlEnableBackfaceCulling();
+        SetInt(lit, "twoSided", 0);
     }
     SurfaceObject(0.25f);
 }

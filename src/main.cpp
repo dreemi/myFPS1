@@ -72,6 +72,7 @@ struct Feel {
     bool wasAlive = true;
     std::map<uint8_t, std::string> names; // remembered, for players who've left
     std::map<uint8_t, bool> wasReloading;
+    uint8_t hillHolder = NO_ID;
 };
 
 int main(int argc, char** argv) {
@@ -463,6 +464,15 @@ int main(int argc, char** argv) {
             }
             feel.wasAlive = local->Alive();
 
+            // King of the hill: say when someone new takes it
+            {
+                HillState hill = session->Hill();
+                if (hill.active && hill.holder != NO_ID && hill.holder != feel.hillHolder)
+                    addFeed(hill.holder == me ? std::string("You took the hill") : nameOf(hill.holder) + " took the hill",
+                            hill.holder == me ? Color{ 120, 220, 120, 255 } : Color{ 220, 200, 160, 255 });
+                feel.hillHolder = hill.holder;
+            }
+
             // Other people's reloads, heard from where they are
             for (const SoldierView& v : session->Others()) {
                 bool was = feel.wasReloading[v.id];
@@ -535,7 +545,26 @@ int main(int argc, char** argv) {
             cam.fovy = 60.0f;
             cam.projection = CAMERA_PERSPECTIVE;
         }
-        if (overview >= 0 && world.map == MapId::Redoubt) {
+        if (overview >= 0 && world.map == MapId::OldTown) {
+            static const Vector3 VIEWS[][2] = {
+                { { 0.0f, 170.0f, 0.0f }, { 0, 0, 0 } },              // straight down (A on the left)
+                { { 18.5f, 1.7f, -74.0f }, { 8, 1.8f, -62 } },       // team A's spawn yard, looking out
+                { { 13.0f, 1.7f, -15.0f }, { 0, 1.2f, 0 } },         // the hill from the north-west street
+                { { 24.0f, 48.0f, -105.0f }, { 0, 0, -20 } },        // over team A's end
+                { { 19.0f, 1.7f, -62.0f }, { 19, 1.7f, -30 } },      // the north alley
+                { { 16.0f, 18.0f, -24.0f }, { 0, 0, 0 } },           // the plaza from above
+                { { 9.0f, 1.7f, -50.0f }, { 9, 1.8f, -20 } },        // between the L-block and the storage building
+                { { 13.0f, 1.7f, -18.0f }, { 19.5f, 1.2f, -12.5f } },// the winery nook
+                { { -12.0f, 1.7f, -56.0f }, { -14, 2, -25 } },       // past the plaster house
+                { { 0.0f, 1.7f, 9.0f }, { 0, 2, 40 } },              // from the hill toward team B
+            };
+            int v = overview % (int)(sizeof(VIEWS) / sizeof(VIEWS[0]));
+            cam.position = VIEWS[v][0];
+            cam.target = VIEWS[v][1];
+            cam.up = v == 0 ? Vector3{ 1, 0, 0 } : Vector3{ 0, 1, 0 };
+            cam.fovy = v == 0 ? 50.0f : 70.0f;
+            cam.projection = CAMERA_PERSPECTIVE;
+        } else if (overview >= 0 && world.map == MapId::Redoubt) {
             static const Vector3 VIEWS[][2] = {
                 { { 0.0f, 150.0f, 0.0f }, { 0, 0, 0 } },              // straight down (A on the left)
                 { { -27.5f, 16.7f, -83.0f }, { -6, 12, 0 } },        // A's lookout, toward the middle
@@ -689,6 +718,7 @@ int main(int argc, char** argv) {
                 hs.screenW = SCREEN_W;
                 hs.screenH = SCREEN_H;
                 hs.health = local->body.GetHealth();
+                hs.position = local->body.GetFeet();
                 hs.helmet = local->helmet;
                 hs.maxHealth = local->body.GetMaxHealth();
                 hs.alive = local->Alive();
@@ -714,6 +744,16 @@ int main(int argc, char** argv) {
                 hs.paused = paused;
                 hs.showFps = showFps;
                 hs.scores = &scores;
+                hs.hill = session->Hill();
+                hs.hillYou = hs.hill.holder == local->id;
+                hs.hillHolder = nameOf(hs.hill.holder);
+                for (const ScoreRow& r : scores)
+                    if (r.local) hs.hillScore = r.hill;
+                {
+                    Vector3 f = local->body.GetFeet();
+                    float dx = f.x - world.hillCenter.x, dz = f.z - world.hillCenter.z;
+                    hs.onHill = local->Alive() && dx * dx + dz * dz <= world.hillRadius * world.hillRadius;
+                }
                 hs.showScores = IsKeyDown(KEY_TAB);
                 if (session->Mode() == SessionMode::Host) {
                     std::string addrs;

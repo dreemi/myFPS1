@@ -46,7 +46,7 @@ add_executable(fps
     src/helmet.cpp
     src/player.cpp
     src/weapon.cpp
-    src/world.cpp src/map_redoubt.cpp
+    src/world.cpp src/map_redoubt.cpp src/map_oldtown.cpp
     src/enemy.cpp
     src/viewmodel.cpp
     src/rifle_view.cpp
@@ -70,14 +70,14 @@ endif()
 
 # Movement tests (run with: ctest --test-dir build --output-on-failure)
 enable_testing()
-add_executable(player_test tests/player_test.cpp src/player.cpp src/world.cpp src/map_redoubt.cpp)
+add_executable(player_test tests/player_test.cpp src/player.cpp src/world.cpp src/map_redoubt.cpp src/map_oldtown.cpp)
 target_link_libraries(player_test PRIVATE raylib)
 if (WIN32)
     target_link_libraries(player_test PRIVATE winmm)
 endif()
 add_test(NAME player_test COMMAND player_test)
 
-add_executable(enemy_test tests/enemy_test.cpp src/enemy.cpp src/world.cpp src/map_redoubt.cpp src/weapon.cpp src/player.cpp
+add_executable(enemy_test tests/enemy_test.cpp src/enemy.cpp src/world.cpp src/map_redoubt.cpp src/map_oldtown.cpp src/weapon.cpp src/player.cpp
     src/viewmodel.cpp src/rifle_view.cpp src/weapon_models.cpp src/character.cpp src/effects.cpp src/render.cpp src/scenery_mesh.cpp src/materials.cpp
     src/soldier.cpp src/helmet.cpp)
 target_link_libraries(enemy_test PRIVATE raylib)
@@ -88,7 +88,7 @@ add_test(NAME enemy_test COMMAND enemy_test)
 
 # Multiplayer: a host and a client in one process over loopback
 add_executable(net_test tests/net_test.cpp src/game/sim.cpp src/game/session.cpp src/net/protocol.cpp
-    src/enemy.cpp src/world.cpp src/map_redoubt.cpp src/weapon.cpp src/player.cpp src/weapon_models.cpp src/character.cpp src/render.cpp src/scenery_mesh.cpp
+    src/enemy.cpp src/world.cpp src/map_redoubt.cpp src/map_oldtown.cpp src/weapon.cpp src/player.cpp src/weapon_models.cpp src/character.cpp src/render.cpp src/scenery_mesh.cpp
     src/materials.cpp src/soldier.cpp src/helmet.cpp src/effects.cpp)
 target_link_libraries(net_test PRIVATE raylib net_transport)
 if (WIN32)

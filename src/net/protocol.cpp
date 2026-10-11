@@ -301,6 +301,7 @@ std::vector<uint8_t> EncodeSnapshot(const Snapshot& s) {
         w.I16((int16_t)p.kills);
         w.I16((int16_t)p.deaths);
         w.U16((uint16_t)(p.ping < 0 ? 0 : (p.ping > 65535 ? 65535 : p.ping)));
+        w.U16((uint16_t)(p.hill < 0 ? 0 : (p.hill > 65535 ? 65535 : p.hill)));
     }
     w.U8((uint8_t)s.bots.size());
     for (const SoldierView& b : s.bots) WriteSoldier(w, b);
@@ -308,7 +309,10 @@ std::vector<uint8_t> EncodeSnapshot(const Snapshot& s) {
         Snapshot::BotScore sc = i < s.botScores.size() ? s.botScores[i] : Snapshot::BotScore{};
         w.I16((int16_t)sc.kills);
         w.I16((int16_t)sc.deaths);
+        w.U16((uint16_t)(sc.hill < 0 ? 0 : (sc.hill > 65535 ? 65535 : sc.hill)));
     }
+    w.U8((uint8_t)((s.hill.active ? 1 : 0) | (s.hill.contested ? 2 : 0)));
+    w.U8(s.hill.holder);
     return w.data;
 }
 
@@ -327,6 +331,7 @@ bool DecodeSnapshot(const std::vector<uint8_t>& msg, Snapshot& out) {
         p.kills = r.I16();
         p.deaths = r.I16();
         p.ping = r.U16();
+        p.hill = r.U16();
         out.players.push_back(p);
     }
     int b = r.U8();
@@ -335,8 +340,13 @@ bool DecodeSnapshot(const std::vector<uint8_t>& msg, Snapshot& out) {
         Snapshot::BotScore sc;
         sc.kills = r.I16();
         sc.deaths = r.I16();
+        sc.hill = r.U16();
         out.botScores.push_back(sc);
     }
+    uint8_t hf = r.U8();
+    out.hill.active = hf & 1;
+    out.hill.contested = hf & 2;
+    out.hill.holder = r.U8();
     return r.ok;
 }
 

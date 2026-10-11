@@ -193,6 +193,8 @@ GameSim::GameSim(const World& w, int botCount, unsigned s) : world(w), spawns(w.
     botWasAlive.assign(bots.size(), true);
     botKills.assign(bots.size(), 0);
     botDeaths.assign(bots.size(), 0);
+    botHill.assign(bots.size(), 0.0f);
+    hill.active = world.hillRadius > 0.0f;
 }
 
 SoldierView GameSim::BotView(int index) const {
@@ -654,5 +656,26 @@ void GameSim::Update(float dt) {
             if (p->respawnTimer <= 0.0f) RespawnPlayer(*p);
         }
     }
+    UpdateHill(dt);
     RecordHistory();
+}
+
+// King of the hill: whoever is alone in the circle (alive) scores the time they hold it
+void GameSim::UpdateHill(float dt) {
+    if (!hill.active) return;
+    auto on = [&](Vector3 feet) {
+        float dx = feet.x - world.hillCenter.x, dz = feet.z - world.hillCenter.z;
+        return dx * dx + dz * dz <= world.hillRadius * world.hillRadius;
+    };
+    int count = 0;
+    uint8_t who = NO_ID;
+    for (const auto& p : players)
+        if (p->Alive() && on(p->body.GetFeet())) { count++; who = p->id; }
+    for (int i = 0; i < (int)bots.size(); i++)
+        if (bots[i].IsAlive() && on(bots[i].GetFeet())) { count++; who = (uint8_t)(BOT_ID_BASE + i); }
+    hill.contested = count > 1;
+    hill.holder = count == 1 ? who : NO_ID;
+    if (count != 1) return;
+    if (who >= BOT_ID_BASE) botHill[who - BOT_ID_BASE] += dt;
+    else if (SimPlayer* p = Find(who)) p->hillTime += dt;
 }

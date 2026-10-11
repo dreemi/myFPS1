@@ -15,6 +15,8 @@ blender --background --factory-startup --disable-autoexec --python tools/scan_fa
                  roof). For scans without a real-world scale. Otherwise centimetre scans are
                  detected by their size and everything else is taken as metres.
 --no-roof        a wall only, even if something sits above it
+--no-caps        leave the ends open (by default each end is closed with the facade's
+                 profile, so facades of different heights can stand side by side)
 
 The scan may face any way: the wall's face is turned to look toward the game's +Z.
 
@@ -33,6 +35,7 @@ MAX_TRIS = int(args[3]) if len(args) > 3 else 2000
 TEX = int(args[4]) if len(args) > 4 else 2048
 FLAT = "--flat" in opts
 NO_ROOF = "--no-roof" in opts
+CAPS = "--no-caps" not in opts
 WALL_HEIGHT = float(opts["--wall-height"]) if "--wall-height" in opts else None
 os.makedirs(out, exist_ok=True)
 t0 = time.time()
@@ -257,8 +260,17 @@ else:
     rows = budget_quads // cols
     wall_rows, eave_rows, roof_rows = rows, 0, 0
 quad_rows = wall_rows + eave_rows + roof_rows
-log("grid: %d columns x %d rows (wall %d, eave %d, roof %d) = %d tris" %
-    (cols, quad_rows, wall_rows, eave_rows, roof_rows, cols * quad_rows * 2))
+# The end caps: a fan of one triangle per row at each end
+cap_tris = 2 * quad_rows if CAPS else 0
+while cols * quad_rows * 2 + cap_tris > MAX_TRIS:
+    if roof_rows > wall_rows and roof_rows > 3:
+        roof_rows -= 1
+    else:
+        wall_rows -= 1
+    quad_rows = wall_rows + eave_rows + roof_rows
+    cap_tris = 2 * quad_rows if CAPS else 0
+log("grid: %d columns x %d rows (wall %d, eave %d, roof %d) + end caps = %d tris" %
+    (cols, quad_rows, wall_rows, eave_rows, roof_rows, cols * quad_rows * 2 + cap_tris))
 
 def snap(p, n, reach=0.6):
     """Move p onto the scanned surface along +-n (nearest hit within reach)."""
@@ -302,10 +314,11 @@ bm = bmesh.new()
 uv_layer = bm.loops.layers.uv.new("UVMap")
 verts = [[bm.verts.new(p) for p in col] for col in columns]
 nrows = len(columns[0])
+U_GRID = 0.94 if CAPS else 1.0      # the caps' texture goes in the strip to the right
 for r in range(nrows - 1):
     for i in range(cols):
         a_, b_, c_, d_ = verts[i][r], verts[i + 1][r], verts[i + 1][r + 1], verts[i][r + 1]
-        u0, u1 = i / cols, (i + 1) / cols
+        u0, u1 = U_GRID * i / cols, U_GRID * (i + 1) / cols
         uva, uvb, uvc, uvd = (u0, vcoord[i][r]), (u1, vcoord[i + 1][r]), (u1, vcoord[i + 1][r + 1]), (u0, vcoord[i][r + 1])
         for tri, uvs in (((a_, b_, c_), (uva, uvb, uvc)), ((a_, c_, d_), (uva, uvc, uvd))):
             f = bm.faces.new(tri)
@@ -316,6 +329,42 @@ bm.normal_update()
 front = sum((f.normal * f.calc_area() for f in bm.faces), Vector())
 if front.y > 0:
     bmesh.ops.reverse_faces(bm, faces=bm.faces)
+grid_faces = len(bm.faces)
+# End caps: each end closed by the facade's profile (foot, up the wall, along the roof to
+# its top, straight down to the ground behind), a fan from the bottom corner at the back.
+# There's no scan there: the bake fills them from the colours nearby.
+max_cap_depth, min_cap_y, max_cap_height = 0.0, 0.0, 1.0
+if CAPS:
+    for col in (0, cols):
+        cys = [v.co.y for v in verts[col]]
+        min_cap_y = min(min_cap_y, min(cys))
+        max_cap_depth = max(max_cap_depth, max(cys) - min(min(cys), 0.0))
+        max_cap_height = max(max_cap_height, max(v.co.z for v in verts[col]))
+    for end, col in ((0, 0), (1, cols)):
+        prof = verts[col]
+        top = prof[-1].co
+        back = bm.verts.new(Vector((top.x, top.y, 0.0)))
+        ys = [v.co.y for v in prof] + [back.co.y]
+        zs = [v.co.z for v in prof] + [0.0]
+        y0, y1, z0, z1 = min(ys), max(ys), min(zs), max(zs)
+        v_lo = 0.0 if end == 0 else 0.5
+        def cap_uv(v):
+            return (U_GRID + 0.01 + 0.04 * (v.co.y - y0) / max(y1 - y0, 1e-6),
+                    v_lo + 0.01 + 0.48 * (v.co.z - z0) / max(z1 - z0, 1e-6))
+        outward = Vector((-1 if end == 0 else 1, 0, 0))
+        for k in range(len(prof) - 1):
+            tri = [back, prof[k], prof[k + 1]]
+            nrm = (tri[1].co - tri[0].co).cross(tri[2].co - tri[0].co)
+            if nrm.length < 1e-9:
+                continue
+            if nrm.dot(outward) < 0:
+                tri = [back, prof[k + 1], prof[k]]
+            try:
+                f = bm.faces.new(tri)
+            except ValueError:
+                continue
+            for loop in f.loops:
+                loop[uv_layer].uv = cap_uv(loop.vert)
 bm.to_mesh(lowme)
 bm.free()
 eave_z = float(np.mean(eave))
@@ -392,6 +441,26 @@ color, cnode = bake("color", 'EMIT', 'sRGB', (0.55, 0.52, 0.47, 1))
 log("baked colour")
 normal, nnode = bake("normal", 'NORMAL', 'Non-Color', (0.5, 0.5, 1.0, 1))
 log("baked normals")
+
+# The caps had nothing to bake (the scan has no sides). Now that the bake is done, point
+# them at the facade's own wall instead: the plaster near the end it closes, stretched over
+# the whole profile (the gable is plastered too)
+if CAPS:
+    uvl = lowme.uv_layers.active.data
+    v_wall = vcoord[0][wall_rows] * 0.96         # the top of the wall in the texture
+    length = x_hi - x_lo
+    for poly in lowme.polygons[grid_faces:]:
+        ys = [lowme.vertices[i].co.y for i in poly.vertices]
+        zs = [lowme.vertices[i].co.z for i in poly.vertices]
+        end_right = lowme.vertices[poly.vertices[0]].co.x > 0
+        for li, vi in zip(poly.loop_indices, poly.vertices):
+            co = lowme.vertices[vi].co
+            span = max(1e-3, max_cap_depth)
+            along = (co.y - min_cap_y) / span * min(1.0, span / length)
+            u = U_GRID * (1.0 - 0.02 - along) if end_right else U_GRID * (0.02 + along)
+            v = 0.02 + (co.z / max(1e-3, max_cap_height)) * (v_wall - 0.02)
+            uvl[li].uv = (u, v)
+    log("end caps now show the facade's own wall")
 
 bsdf = nt.nodes["Principled BSDF"]
 bsdf.inputs["Roughness"].default_value = 0.9

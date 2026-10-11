@@ -5,7 +5,8 @@ map and a 2048 normal map (JPEG) baked from the full scan. Model space is glTF's
 metres, standing on the ground at the origin.
 
 Facades (`tools/scan_facade.py ... 2000 2048 --flat`): a wall, with its roof slope where it has
-one, rebuilt as a grid. The face looks toward +Z. These are one-sided: the back is open.
+one, rebuilt as a grid, its ends closed with its profile (showing its own wall's plaster). The
+face looks toward +Z; the back is open, so the game draws scans from both sides.
 Objects (`tools/scan_object.py ... 2000 2048`): simplified 3D shapes.
 All repacked with `tools/scan_repack.py` (JPEG, quality 90).
 
@@ -24,3 +25,6 @@ All repacked with `tools/scan_repack.py` (JPEG, quality 90).
 
 Scans "without a real scale" were sized by eye from their doors and windows; the wall
 heights above are guesses that can be changed by re-running with another `--wall-height`.
+
+Collision for the whole objects comes from `tools/scan_colliders.py` (their footprint in 50 cm or
+1 m squares, merged into boxes), pasted into the map that uses them (`src/map_oldtown.cpp`).

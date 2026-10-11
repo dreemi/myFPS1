@@ -266,6 +266,35 @@ int main() {
         CHECK(botRows == 2, "the scoreboard lists the bots (%d)", botRows);
     }
 
+    std::printf("King of the hill\n");
+    {
+        World town = BuildOldTown();
+        GameSim sim(town, 0, 4);
+        SimPlayer* a = sim.AddPlayer("A");
+        SimPlayer* b = sim.AddPlayer("B");
+        auto place = [](SimPlayer* p, Vector3 at) { PlayerState st = p->body.GetState(); st.feet = at; p->body.SetState(st); };
+        place(a, { 5.0f, 0, 5.0f });
+        place(b, { 0, 0, -60.0f });
+        for (int i = 0; i < 120; i++) sim.Update(DT);
+        CHECK(sim.Hill().active && sim.Hill().holder == a->id && !sim.Hill().contested, "alone on the hill, A holds it");
+        CHECK(fabsf(a->hillTime - 2.0f) < 0.05f && b->hillTime == 0.0f, "and scores the time held (%.2f s)", a->hillTime);
+        place(b, { -5.0f, 0, -4.0f });
+        for (int i = 0; i < 60; i++) sim.Update(DT);
+        CHECK(sim.Hill().contested && sim.Hill().holder == NO_ID, "two on it: contested, nobody scores");
+        CHECK(fabsf(a->hillTime - 2.0f) < 0.05f, "(A's time stays at %.2f s)", a->hillTime);
+
+        Proto::Snapshot snap;
+        snap.hill = sim.Hill();
+        snap.players.push_back({ a->View(), 1, 2, 30, 17 });
+        Proto::Snapshot back;
+        bool ok = Proto::DecodeSnapshot(Proto::EncodeSnapshot(snap), back);
+        CHECK(ok && back.hill.active && back.hill.contested && back.players[0].hill == 17, "the hill travels in snapshots");
+
+        World plain = BuildTestWorld();
+        GameSim none(plain, 0, 1);
+        CHECK(!none.Hill().active, "maps without a hill have none");
+    }
+
     std::printf("Bots fight each other\n");
     {
         GameSim sim(world, 2, 3); // no players: the bots only have each other
