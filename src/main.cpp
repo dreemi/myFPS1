@@ -547,16 +547,16 @@ int main(int argc, char** argv) {
         }
         if (overview >= 0 && world.map == MapId::OldTown) {
             static const Vector3 VIEWS[][2] = {
-                { { 0.0f, 170.0f, 0.0f }, { 0, 0, 0 } },              // straight down (A on the left)
-                { { 18.5f, 1.7f, -74.0f }, { 8, 1.8f, -62 } },       // team A's spawn yard, looking out
-                { { 13.0f, 1.7f, -15.0f }, { 0, 1.2f, 0 } },         // the hill from the north-west street
-                { { 24.0f, 48.0f, -105.0f }, { 0, 0, -20 } },        // over team A's end
-                { { 19.0f, 1.7f, -62.0f }, { 19, 1.7f, -30 } },      // the north alley
-                { { 16.0f, 18.0f, -24.0f }, { 0, 0, 0 } },           // the plaza from above
-                { { 9.0f, 1.7f, -50.0f }, { 9, 1.8f, -20 } },        // between the L-block and the storage building
-                { { 13.0f, 1.7f, -18.0f }, { 19.5f, 1.2f, -12.5f } },// the winery nook
-                { { -12.0f, 1.7f, -56.0f }, { -14, 2, -25 } },       // past the plaster house
-                { { 0.0f, 1.7f, 9.0f }, { 0, 2, 40 } },              // from the hill toward team B
+                { { 0.0f, 120.0f, 0.0f }, { 0, 0, 0 } },              // straight down (A on the left)
+                { { 16.5f, 1.7f, -50.0f }, { 10, 1.8f, -40 } },      // team A's spawn yard, looking out
+                { { 11.0f, 1.7f, -13.0f }, { 0, 1.2f, 0 } },         // the hill from the north alley's end
+                { { 18.0f, 40.0f, -75.0f }, { 0, 0, -20 } },         // over team A's end
+                { { 14.5f, 1.7f, -43.0f }, { 14.5f, 1.7f, -20 } },   // the north alley
+                { { 12.0f, 16.0f, -18.0f }, { 0, 0, 0 } },           // the square from above
+                { { 4.2f, 1.7f, -38.0f }, { 4.2f, 1.6f, -15 } },     // the middle alley
+                { { -5.0f, 1.7f, -14.0f }, { -12.0f, 1.0f, -3.0f } }, // the plaster house across the square
+                { { -14.6f, 1.7f, -40.0f }, { -14.6f, 1.8f, -15 } }, // the south alley
+                { { 0.0f, 1.7f, 6.0f }, { 0, 2, 30 } },              // from the hill toward team B
             };
             int v = overview % (int)(sizeof(VIEWS) / sizeof(VIEWS[0]));
             cam.position = VIEWS[v][0];

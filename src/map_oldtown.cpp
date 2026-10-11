@@ -1,16 +1,19 @@
 // Map: "Old Town", a walled-in old quarter built from photogrammetry scans
-// (assets/models/scans), around a King of the Hill plaza. Team A spawns in the corner at
+// (assets/models/scans), around a King of the Hill square. Team A spawns in the corner at
 // -Z, +X; team B in the opposite corner. Everything on team A's half has a twin turned half
 // a circle about the centre. Top view (X up the page, Z to the right, as the design sketch):
 //
-//   [A spawn]  ======== rows of old houses (the north edge) =========================
-//   |          L-block of houses ......    [winery nook]   ...  [plaster house]   |
-//   |          |        [storage bldg]      ( THE HILL )    [storage bldg]        |
-//   |   [ruin]                    [plaster house]   [winery nook]        L-block   |
-//   ======================== rows of old houses (the south edge) ======  [B spawn]
+//   [A] ===== rows of old houses (the north edge) ====[plaster]=============== [winery]
+//   [ ]  alley    L-block of houses            ..                      [storage]   |
+//   |  wing ===   alley          ( THE HILL )          alley                       |
+//   |  [ruin]       [storage]                         L-block of houses   wing ==  |
+//   [winery] ========= rows of old houses (the south edge) ===[plaster]======== [B]
 //
+// - The streets are alleys about 4 m wall to wall; only the square round the hill opens up.
 // - The buildings are shells: facades (a wall and its roof) and whole scanned buildings.
 //   Nothing has an inside; each has invisible boxes for collision.
+// - Every building stands on the paving with a raised sidewalk round it (16 cm, stepped
+//   onto), made from the buildings' footprints so the slabs never overlap.
 // - Facades stand 5 cm apart, and back-to-back ones 2 cm apart at the ridge, so their
 //   end caps never share a plane (AGENTS.md: no z-fighting).
 #include "world.hpp"
@@ -21,8 +24,12 @@
 
 namespace {
 
-const float HALF_W = 27.0f, HALF_L = 80.75f;
+const float HALF_W = 20.5f, HALF_L = 56.5f;
 const float GAP = 0.05f;              // between facades in a row
+const float WALK_W = 1.0f;            // sidewalk width out from a building
+const float WALK_TUCK = 1.0f;         // and how far in under it
+const float WALK_H = 0.16f;           // sidewalk height (players and bots step up onto it)
+const float WALK_CELL = 0.25f;        // the grid the sidewalks are laid out on
 
 // What the scanned models measure (model space: Y up; a facade's face looks toward +Z)
 struct ModelInfo {
@@ -145,6 +152,8 @@ const Col WINERY_COL[] = {
 struct Builder {
     World w;
     std::shared_ptr<Scenery> sc = std::make_shared<Scenery>();
+    struct Foot { float x0, x1, z0, z1; };
+    std::vector<Foot> feet;      // where buildings stand: the sidewalks go round these
 
     void Add(float x0, float x1, float y0, float y1, float z0, float z1, Surface s, uint8_t flags = 0) {
         if (x1 - x0 < 1e-4f || y1 - y0 < 1e-4f || z1 - z0 < 1e-4f) return;
@@ -160,8 +169,14 @@ struct Builder {
         Add(x0, x1, y0, y1, z0, z1, s, flags);
         Add(-x1, -x0, y0, y1, -z1, -z0, s, flags);
     }
-    void Solid(float x0, float x1, float z0, float z1, float h) {   // invisible collision
-        Twin(fminf(x0, x1), fmaxf(x0, x1), 0, h, fminf(z0, z1), fmaxf(z0, z1), Surface::Plaster, BOX_HIDDEN);
+    // Invisible collision; a building's (not a ruin's or junk's) also gets a sidewalk round it
+    void Solid(float x0, float x1, float z0, float z1, float h, bool building = true) {
+        float ax = fminf(x0, x1), bx = fmaxf(x0, x1), az = fminf(z0, z1), bz = fmaxf(z0, z1);
+        Twin(ax, bx, 0, h, az, bz, Surface::Plaster, BOX_HIDDEN);
+        if (building) {
+            feet.push_back({ ax, bx, az, bz });
+            feet.push_back({ -bx, -ax, -bz, -az });
+        }
     }
     // A scanned model (and its twin), turned by yaw (a multiple of 90 degrees)
     void Prop(const char* model, float x, float y, float z, float yaw) {
@@ -169,14 +184,64 @@ struct Builder {
         sc->props.push_back({ model, { -x, y, -z }, yaw + PI, 1.0f });
     }
     // Model-space boxes placed with a prop (yaw a multiple of 90 degrees keeps them boxes)
-    void Colliders(const Col* cols, int count, float x, float z, float yaw) {
+    void Colliders(const Col* cols, int count, float x, float z, float yaw, bool building = true) {
         float c = roundf(cosf(yaw)), s = roundf(sinf(yaw));
         for (int i = 0; i < count; i++) {
             const Col& k = cols[i];
             float ax = x + k.x0 * c + k.z0 * s, az = z - k.x0 * s + k.z0 * c;
             float bx = x + k.x1 * c + k.z1 * s, bz = z - k.x1 * s + k.z1 * c;
-            Solid(ax, bx, az, bz, k.h);
+            Solid(ax, bx, az, bz, k.h, building);
         }
+    }
+
+    // Raised sidewalks round every building: the ground within WALK_W of a footprint, and
+    // WALK_TUCK in under it (a scan's collision reaches past the foot of its walls where the
+    // roof overhangs, and walls are uneven: the slab has to run on under them). Laid
+    // out on a grid over team A's half, merged into boxes that never overlap (so no two tops
+    // share a plane where they meet), then twinned.
+    void Sidewalks() {
+        const int nx = (int)lroundf(2 * HALF_W / WALK_CELL), nz = (int)lroundf(HALF_L / WALK_CELL);
+        auto cx = [&](int i) { return -HALF_W + (i + 0.5f) * WALK_CELL; };
+        auto cz = [&](int k) { return -HALF_L + (k + 0.5f) * WALK_CELL; };
+        std::vector<char> inside(nx * nz, 0);
+        for (int i = 0; i < nx; i++)
+            for (int k = 0; k < nz; k++)
+                for (const Foot& f : feet)
+                    if (cx(i) > f.x0 && cx(i) < f.x1 && cz(k) > f.z0 && cz(k) < f.z1) { inside[i * nz + k] = 1; break; }
+        // Square neighbourhoods: any building within reach, any open ground next to it
+        auto any = [&](int i, int k, int r, char want) {
+            for (int a = i - r; a <= i + r; a++)
+                for (int b = k - r; b <= k + r; b++) {
+                    // off the map: buildings go on past the edges, past z = 0 is the twin half
+                    // (this half turned round, so the cell matching it)
+                    char v = (a < 0 || a >= nx || b < 0) ? 1 : (b >= nz ? inside[(nx - 1 - a) * nz + (2 * nz - 1 - b)] : inside[a * nz + b]);
+                    if (v == want) return true;
+                }
+            return false;
+        };
+        const int reach = (int)lroundf(WALK_W / WALK_CELL), tuck = (int)lroundf(WALK_TUCK / WALK_CELL);
+        std::vector<char> walk(nx * nz, 0);
+        for (int i = 0; i < nx; i++)
+            for (int k = 0; k < nz; k++)
+                walk[i * nz + k] = inside[i * nz + k] ? any(i, k, tuck, 0) : any(i, k, reach, 1);
+        // Merge into boxes: a run along X, grown along Z while the next row has the same run
+        for (int k = 0; k < nz; k++)
+            for (int i = 0; i < nx; i++) {
+                if (!walk[i * nz + k]) continue;
+                int i1 = i;
+                while (i1 + 1 < nx && walk[(i1 + 1) * nz + k]) i1++;
+                int k1 = k;
+                auto rowFull = [&](int kk) {
+                    for (int a = i; a <= i1; a++) if (!walk[a * nz + kk]) return false;
+                    return true;
+                };
+                while (k1 + 1 < nz && rowFull(k1 + 1)) k1++;
+                for (int a = i; a <= i1; a++)
+                    for (int b = k; b <= k1; b++) walk[a * nz + b] = 0;
+                Twin(-HALF_W + i * WALK_CELL, -HALF_W + (i1 + 1) * WALK_CELL, -0.1f, WALK_H,
+                     -HALF_L + k * WALK_CELL, -HALF_L + (k1 + 1) * WALK_CELL, Surface::Sandstone);
+                i = i1;
+            }
     }
     void Ring(float inner, float outer, float bottom, float top, float from, float to, Surface s) {
         sc->rings.push_back({ { 0, 0, 0 }, inner, outer, bottom, top, from, to, s });
@@ -226,110 +291,110 @@ struct Builder {
 
 World BuildOldTown() {
     Builder m;
-    const float NaN = NAN;
 
     // --- The north edge (its twin is the south edge): houses facing into the town, roofs
-    //     sloping away. Two pieces stand out of the line: the winery nook (an alcove with
-    //     junk in it) and the plaster house.
-    const float northLine = 20.7f;
-    float z = m.Row({ &M_LONG, &M_HOUSE_A, &M_HOUSE_B }, 'x', northLine, -1, -63.25f, HALF_W + 0.5f);
-    // Winery nook: its back wall on the line, its floor 3 cm off the paving
-    {
-        float zc = z - M_WINERY.x0;                     // the model's +x runs along +Z here
-        float x = northLine - 0.93f - 0.02f;          // its back wall just in front of the line
-        m.Prop(M_WINERY.name, x, 0.03f, zc, -PI / 2);
-        m.Colliders(WINERY_COL, sizeof(WINERY_COL) / sizeof(Col), x, zc, -PI / 2);
-        m.Solid(northLine, HALF_W + 0.5f, z, z + (M_WINERY.x1 - M_WINERY.x0), 4.0f);
-        z += M_WINERY.x1 - M_WINERY.x0 + GAP;
-    }
-    z = m.Row({ &M_YELLOW, &M_HOUSE_C, &M_DOOR, &M_HOUSE_B }, 'x', northLine, -1, z, HALF_W + 0.5f);
+    //     sloping away. Two pieces stand out of the line: the plaster house, which closes in
+    //     the square, and the winery nook (an alcove with junk in it).
+    const float northLine = 16.6f;
+    const float rowStart = -44.0f;
+    float z = m.Row({ &M_LONG, &M_HOUSE_A }, 'x', northLine, -1, rowStart, HALF_W + 0.5f);
     // The plaster house: a whole building standing forward of the line, its back on it
     {
         float zc = z - M_PLASTER.x0;
-        float x = northLine + 0.8f + M_PLASTER.back;    // back face 0.8 m behind the line, front out in the street
+        float x = northLine + 0.8f + M_PLASTER.back;    // back face 0.8 m behind the line, front out in the square
         m.Prop(M_PLASTER.name, x, -0.06f, zc, -PI / 2);
         m.Colliders(PLASTER_COL, sizeof(PLASTER_COL) / sizeof(Col), x, zc, -PI / 2);
         m.Solid(northLine, HALF_W + 0.5f, z, z + (M_PLASTER.x1 - M_PLASTER.x0), 6.0f);
         z += M_PLASTER.x1 - M_PLASTER.x0 + GAP;
     }
-    z = m.Row({ &M_HOUSE_A, &M_YELLOW, &M_HOUSE_C, &M_DOOR }, 'x', northLine, -1, z, HALF_W + 0.5f);
+    // Winery nook: its back wall on the line, its floor 3 cm off the paving
+    {
+        float zc = z - M_WINERY.x0;                     // the model's +x runs along +Z here
+        float x = northLine - 0.93f - 0.02f;          // its back wall just in front of the line
+        m.Prop(M_WINERY.name, x, 0.03f, zc, -PI / 2);
+        m.Colliders(WINERY_COL, sizeof(WINERY_COL) / sizeof(Col), x, zc, -PI / 2, false);
+        m.Solid(northLine, HALF_W + 0.5f, z, z + (M_WINERY.x1 - M_WINERY.x0), 4.0f);
+        z += M_WINERY.x1 - M_WINERY.x0 + GAP;
+    }
+    z = m.Row({ &M_YELLOW, &M_HOUSE_C, &M_DOOR }, 'x', northLine, -1, z, HALF_W + 0.5f);
     // A plastered pier closes the corner where this row meets the east end's row
-    const float eastLine = 74.95f;
+    const float eastLine = 52.0f;
     m.Twin(northLine, northLine + 3.5f, 0, 3.6f, z, eastLine - 0.01f, Surface::Plaster);
     m.Solid(northLine, HALF_W + 0.5f, z, eastLine, 4.0f);
+    m.Solid(northLine, HALF_W + 0.5f, eastLine, HALF_L + 0.5f, 4.0f);    // the corner behind the pier
 
     // --- The west end (twin: the east end): houses facing +Z, from the south edge's line
     //     to where team A's spawn opens out
     const float westLine = -eastLine;
-    float x = m.Row({ &M_HOUSE_C, &M_YELLOW, &M_HOUSE_B, &M_DOOR }, 'z', westLine, +1, -northLine + GAP, -HALF_L - 0.5f);
+    float x = m.Row({ &M_HOUSE_C, &M_YELLOW, &M_HOUSE_B }, 'z', westLine, +1, -northLine + GAP, -HALF_L - 0.5f);
 
-    // --- Team A's spawn: a corner yard at the far west, backed by more houses
+    // --- Team A's spawn: a yard in the corner, backed by more houses
     {
-        const float backLine = -80.1f;
-        m.Row({ &M_HOUSE_C, &M_HOUSE_B }, 'z', backLine, +1, x + GAP, -HALF_L - 0.5f);
-        // Along the north boundary: facing -X, laid from the north row's start back to the west
-        // (the model's +x runs along +Z for this facing, so lay them from the west end)
-        m.Row({ &M_HOUSE_B, &M_HOUSE_A }, 'x', 26.4f, -1, backLine - 0.6f, HALF_W + 0.5f);
+        const float backLine = -55.4f;
+        m.Row({ &M_HOUSE_B, &M_DOOR }, 'z', backLine, +1, x + GAP, -HALF_L - 0.5f);
+        // Along the north boundary: facing -X, laid from behind the back row toward the north row
+        m.Row({ &M_HOUSE_B, &M_DOOR }, 'x', HALF_W, -1, backLine - 0.6f, HALF_W + 0.5f);
         // A plastered wall closes the step back from the spawn yard to the north row
-        m.Twin(northLine + 0.01f, 26.4f - 0.01f, 0, 3.6f, -63.25f - 0.3f, -63.25f - GAP, Surface::Plaster);
-        m.Solid(northLine, 26.4f, -63.6f, -63.25f, 4.0f);
+        m.Twin(northLine + 0.01f, HALF_W - 0.01f, 0, 3.6f, rowStart - 0.3f, rowStart - GAP, Surface::Plaster);
+        m.Solid(northLine, HALF_W, rowStart - 0.35f, rowStart, 4.0f);
     }
 
-    // --- The L-shaped block of houses north-west of the middle: back-to-back rows meeting at
-    //     a ridge, and a wing reaching south from its west end
+    // --- The L-shaped block of houses: back-to-back rows meeting at a ridge, between the
+    //     north alley and the middle alley, and a wing reaching south from its west end
     {
-        const float ridge = 13.8f;
+        const float ridge = 9.4f;
         // north side (facing +X): each wall as far from the ridge as its roof is deep
-        float zz = -63.45f;
-        for (const ModelInfo* mi : { &M_HOUSE_A, &M_HOUSE_B, &M_HOUSE_C, &M_YELLOW }) {
+        float zz = -45.0f;
+        for (const ModelInfo* mi : { &M_HOUSE_A, &M_HOUSE_B, &M_YELLOW }) {
             float line = ridge + 0.01f - mi->back;    // back (negative) -> wall north of the ridge
             m.Row({ mi }, 'x', line, +1, zz + (mi->x1 - mi->x0), ridge);
             zz += mi->x1 - mi->x0 + GAP;
         }
         // south side (facing -X)
-        zz = -63.45f;
-        for (const ModelInfo* mi : { &M_YELLOW, &M_HOUSE_C, &M_HOUSE_A, &M_HOUSE_B }) {
+        zz = -45.0f;
+        for (const ModelInfo* mi : { &M_YELLOW, &M_HOUSE_C, &M_HOUSE_A }) {
             float line = ridge - 0.01f + mi->back;
             m.Row({ mi }, 'x', line, -1, zz, ridge);
             zz += mi->x1 - mi->x0 + GAP;
         }
-        // the wing: back to back along X, ridge at z = -59.9, from the block's south side west
-        const float wingRidge = -59.9f;
+        // the wing: back to back along X, from the block's south side west
+        const float wingRidge = -44.5f;
         const float wingEnd = ridge + M_YELLOW.back - 0.01f + 0.1f;     // tucked against the south side's wall
         m.Row({ &M_YELLOW }, 'z', wingRidge + 0.01f - M_YELLOW.back, +1, wingEnd - (M_YELLOW.x1 - M_YELLOW.x0), wingRidge);
         m.Row({ &M_HOUSE_A }, 'z', wingRidge - 0.01f + M_HOUSE_A.back, -1, wingEnd, wingRidge);
     }
 
-    // --- A ruined wall out in the open south-west
+    // --- The storage building between the south alley and the middle alley
     {
-        float rx = -11.0f, rz = -59.9f;
-        m.Prop("ruined_wall", rx, 0.0f, rz, 0.0f);
-        m.Colliders(RUIN_COL, sizeof(RUIN_COL) / sizeof(Col), rx, rz, 0.0f);
-    }
-
-    // --- The storage building between the L-block and the plaza
-    {
-        float sx = 0.0f, sz = -33.6f;
+        float sx = -5.56f, sz = -26.0f;
         m.Prop("storage_building", sx, 0.0f, sz, PI / 2);
         m.Colliders(STORAGE_COL, sizeof(STORAGE_COL) / sizeof(Col), sx, sz, PI / 2);
     }
 
+    // --- A ruined wall in the little yard west of the storage building
+    {
+        float rx = -10.5f, rz = -46.5f;
+        m.Prop("ruined_wall", rx, 0.0f, rz, 0.0f);
+        m.Colliders(RUIN_COL, sizeof(RUIN_COL) / sizeof(Col), rx, rz, 0.0f, false);
+    }
+
     // --- The hill: a paved circle marked by a low stone kerb, a fountain basin in the middle
     //     with a plinth, and a little cover round it
-    const float hillR = 10.0f;
+    const float hillR = 7.5f;
     m.Ring(hillR + 0.2f, hillR + 0.6f, 0, 0.18f, PI / 2, 3 * PI / 2, Surface::Stone);
-    m.Ring(2.0f, 2.6f, 0, 0.85f, PI / 2, 3 * PI / 2, Surface::Stone);
+    m.Ring(1.6f, 2.1f, 0, 0.85f, PI / 2, 3 * PI / 2, Surface::Stone);
     m.Add(-0.45f, 0.45f, 0, 1.7f, -0.45f, 0.45f, Surface::Stone);       // plinth (its own twin)
-    m.Crate(4.6f, -6.0f, 1.1f, 0.8f);
-    m.Crate(-6.8f, -3.2f, 1.0f);
-    m.Twin(5.5f, 8.0f, 0, 1.05f, 3.0f, 3.6f, Surface::Sand);           // sandbags
-    m.Twin(-2.0f, 0.6f, 0, 1.05f, -8.4f, -7.8f, Surface::Sand);
+    m.Crate(4.0f, -5.0f, 1.1f, 0.8f);
+    m.Crate(-5.5f, -0.5f, 1.0f);
+    m.Twin(4.0f, 6.0f, 0, 1.05f, 2.6f, 3.2f, Surface::Sand);           // sandbags
+    m.Twin(-1.6f, 0.6f, 0, 1.05f, -6.4f, -5.8f, Surface::Sand);
     // Cover in the streets
-    m.Crate(-17.5f, -12.0f, 1.2f, 0.9f);
-    m.Crate(9.0f, -50.0f, 1.1f);
-    m.Crate(-4.0f, -68.0f, 1.2f, 0.8f);
-    m.Crate(-18.5f, -48.0f, 1.0f);
-    m.Crate(16.5f, -70.5f, 1.1f, 0.8f);                                 // in the spawn yard
+    m.Crate(14.5f, -36.0f, 1.0f);                                       // north alley
+    m.Crate(4.15f, -29.0f, 0.9f);                                       // middle alley
+    m.Crate(-8.0f, -38.5f, 1.2f, 0.8f);                                 // west of the storage building
+    m.Crate(18.5f, -46.5f, 1.1f, 0.8f);                                 // in the spawn yard
+
+    m.Sidewalks();
 
     // --- The boundary: invisible walls (movement only)
     const float wallH = 60.0f;
@@ -343,12 +408,13 @@ World BuildOldTown() {
     w.width = 2 * HALF_W;
     w.length = 2 * HALF_L;
     w.spawns = {
-        { { 18.5f, 0, -74.0f }, atan2f(-18.5f, 74.0f), { 60, 120, 230, 255 } },   // team A, the corner yard
-        { { -18.5f, 0, 74.0f }, atan2f(18.5f, -74.0f), { 220, 60, 60, 255 } },    // team B
+        { { 16.5f, 0, -50.0f }, atan2f(-16.5f, 50.0f), { 60, 120, 230, 255 } },   // team A, the corner yard
+        { { -16.5f, 0, 50.0f }, atan2f(16.5f, -50.0f), { 220, 60, 60, 255 } },    // team B
     };
-    w.hotspots = { { 6, 0, 6 }, { -6, 0, -6 }, { 6, 0, -6 }, { -6, 0, 6 }, { 0, 0, 7 }, { 0, 0, -7 } };
-    for (Vector3 h : { Vector3{ 9.0f, 0, -20.0f }, Vector3{ -12.0f, 0, -40.0f }, Vector3{ 4.0f, 0, -55.0f },
-                       Vector3{ 18.9f, 0, -40.0f }, Vector3{ -14.0f, 0, -20.0f } }) {
+    w.hotspots = { { 3, 0, 3 }, { -3, 0, -3 } };
+    for (Vector3 h : { Vector3{ 5.6f, 0, -3.4f }, Vector3{ -3.4f, 0, -5.6f }, Vector3{ 14.5f, 0, -30.0f },
+                       Vector3{ 4.2f, 0, -22.0f }, Vector3{ -14.7f, 0, -26.0f }, Vector3{ -8.0f, 0, -42.0f },
+                       Vector3{ 2.0f, 0, -49.8f }, Vector3{ 13.0f, 0, -10.0f } }) {
         w.hotspots.push_back(h);
         w.hotspots.push_back({ -h.x, 0, -h.z });
     }

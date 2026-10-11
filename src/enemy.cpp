@@ -186,10 +186,16 @@ std::vector<Ray> Enemy::TakeShots() {
 
 // --- Movement -------------------------------------------------------------
 
+// Bots climb low ledges (a kerb) like players do: only what rises above step height blocks them
+static const float STEP_HEIGHT = 0.45f;
+static bool BodyBlocked(Vector3 feet, float radius, float height, const World& world) {
+    return CylinderCollides({ feet.x, feet.y + STEP_HEIGHT, feet.z }, radius, height - STEP_HEIGHT, world);
+}
+
 // Would walking 1.5 m in this direction hit anything?
 bool Enemy::PathClear(Vector3 dir, const World& world) const {
     for (float d : { 0.5f, 1.0f, 1.5f }) {
-        if (CylinderCollides(Vector3Add(feet, Vector3Scale(dir, d)), radius, height, world)) return false;
+        if (BodyBlocked(Vector3Add(feet, Vector3Scale(dir, d)), radius, height, world)) return false;
     }
     return true;
 }
@@ -200,7 +206,7 @@ bool Enemy::PathWalkable(Vector3 from, Vector3 to, const World& world) const {
     int steps = (int)(dist / 0.4f) + 1;
     for (int i = 1; i <= steps; i++) {
         Vector3 p = Vector3Lerp(from, to, (float)i / steps);
-        if (CylinderCollides(p, radius + 0.05f, height, world)) return false;
+        if (BodyBlocked(p, radius + 0.05f, height, world)) return false;
     }
     return true;
 }
@@ -242,9 +248,11 @@ void Enemy::MoveToward(Vector3 goal, float speed, float dt, const World& world) 
     Vector3 move = Vector3Scale(moveDir, step);
     Vector3 start = feet;
     Vector3 tryX = { feet.x + move.x, feet.y, feet.z };
-    if (!CylinderCollides(tryX, radius, height, world)) feet = tryX;
+    if (!BodyBlocked(tryX, radius, height, world)) feet = tryX;
     Vector3 tryZ = { feet.x, feet.y, feet.z + move.z };
-    if (!CylinderCollides(tryZ, radius, height, world)) feet = tryZ;
+    if (!BodyBlocked(tryZ, radius, height, world)) feet = tryZ;
+    // Up onto a kerb, or back down off it
+    feet.y = FloorUnder({ feet.x, feet.y + STEP_HEIGHT, feet.z }, radius, world);
 
     // Barely moved? Pick a new direction next frame
     if (DistanceXZ(start, feet) < 0.3f * step) blocked = true;
@@ -267,12 +275,12 @@ void Enemy::PlanPosition(const World& world) {
         float r = Rand(minMove, planRadius); // always actually moves somewhere new
         Vector3 p = { feet.x + sinf(angle) * r, 0.0f, feet.z + cosf(angle) * r };
         if (fabsf(p.x) > world.width / 2 - 1.0f || fabsf(p.z) > world.length / 2 - 1.0f) continue;
-        if (CylinderCollides(p, radius + 0.1f, height, world)) continue;
+        if (BodyBlocked(p, radius + 0.1f, height, world)) continue;
         if (!PathWalkable(feet, p, world)) continue;
 
         float toPlayer = DistanceXZ(p, lastKnownFeet);
         bool canSee = HasLineOfSight({ p.x, p.y + eyeHeight, p.z }, lastKnownEye, world);
-        bool nearCover = CylinderCollides(p, radius + 1.2f, 1.2f, world);
+        bool nearCover = BodyBlocked(p, radius + 1.2f, 1.2f + STEP_HEIGHT, world);
 
         float score = (canSee ? 10.0f : 0.0f)              // must be able to shoot from there
                     - fabsf(toPlayer - idealRange)          // at a sensible range

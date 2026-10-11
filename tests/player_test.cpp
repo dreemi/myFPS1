@@ -1015,9 +1015,9 @@ int main() {
         for (int i = 0; i < nx; i++)
             for (int k = 0; k < nz; k++) {
                 Vector3 p = at(i, k);
-                if (fabsf(p.x) > 19.0f || fabsf(p.z) > 70.0f) continue;   // inside the ring of houses
-                if (Vector2Length({ p.x, p.z }) < 2.7f) continue;          // the fountain basin: jumped into, not walked
-                if (!seen[i * nz + k] && !blocked(p)) sealed++;
+                if (fabsf(p.x) > w.width / 2 - 1.5f || fabsf(p.z) > w.length / 2 - 1.5f) continue;   // inside the ring of houses
+                if (Vector2Length({ p.x, p.z }) < 2.2f) continue;          // the fountain basin: jumped into, not walked
+                if (!seen[i * nz + k] && !blocked(p) && sealed++ < 6) std::printf("    sealed off: (%.1f, %.1f)\n", p.x, p.z);
             }
         CHECK(sealed == 0, "no pockets of the town that can't be walked into (%d squares)", sealed);
         std::printf("  (%d walkable squares)\n", openCells);
