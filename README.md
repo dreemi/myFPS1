@@ -1,6 +1,6 @@
 # Dustyard
 
-A small raylib (C++) FPS: an FN FAL and a revolver, AI opponents, a sun-baked town with three routes, a catwalk and a balcony. Play offline, or host a game for up to 8 players over LAN or the internet.
+A raylib (C++) FPS: an FN FAL and a revolver, AI opponents, and two maps: **Redoubt**, a long woodland battlefield with a stone fort in the middle, and **Dustyard**, a small sun-baked town. Play offline, or host a game for up to 8 players over LAN or the internet.
 
 ## Build
 
@@ -11,21 +11,37 @@ Run `build/fps.exe` (assets are copied next to it on every build). CMake downloa
 
 ## Playing
 
-The main menu has three choices:
+The main menu has three choices, and a **map** picker (it applies to playing offline and hosting; joining plays the host's map):
 
 - **Play Offline**: you and the bots, nothing on the network.
-- **Host Game**: starts a game on this PC that you play in. Friends join it. Pick the UDP port (default **27015**) and the number of bots (0–4). While hosting, the top-left corner shows the port and this PC's LAN addresses.
+- **Host Game**: starts a game on this PC that you play in. Friends join it. Pick the UDP port (default **27015**) and the number of bots (0–6). While hosting, the top-left corner shows the port and this PC's LAN addresses.
 - **Join Game**: enter the host's address (IP or host name) and the port. The menu shows *Connecting…*, then puts you in the game, or says why it couldn't (no answer, game full, different version).
 
 Esc opens the pause menu: **Leave game** takes you back to the main menu. If you're the host, everyone who joined you is returned to their menus. A shared game keeps running while you're paused.
 
 From the command line:
 
-    fps.exe --host [port] --bots 2 --name Ann
+    fps.exe --host [port] --bots 2 --name Ann --map redoubt
     fps.exe --join 192.168.1.20:27015 --name Bob
-    fps.exe --offline
+    fps.exe --offline --map dustyard
 
-The name, address, port and bots you last used are saved in `dustyard.cfg` next to the exe.
+The name, address, port, bots and map you last used are saved in `dustyard.cfg` next to the exe.
+
+## Maps
+
+### Redoubt (240 × 64 m)
+
+Long and wide: team A spawns in a log palisade at one end, team B at the other, and the two halves are the same map turned half a circle.
+
+- **The fort**: a round stone redoubt in the exact centre, the objective. A chest-high wall with a two-step fire step inside (stand on it to see and shoot over; step down to hide), two gates set off the axis, a loophole and a breach knocked down to waist height. In the middle is a raised platform with parapets facing the gates, so the gates can't see through to each other.
+- **The forests**: in front of each spawn and across the far corners. Tall trunks with the crowns high overhead and nothing underneath: you can see a long way through them, but there's always a trunk to get behind. Fallen logs and boulders give low cover, and dirt roads wind through so no lane runs straight.
+- **The farmland flanks**: wide, open, plowed fields along both long edges. They're fast and exposed, with a rail fence and a few hay bales. A log **checkpoint hut** with sandbags and a barrier sits where each flank meets the middle.
+- **The houses**: a two-storey stone house for each team near the middle, with doors toward the woods and the fort, windows on both floors, and stairs inside.
+- **The lookout towers**: a stair tower in each team's back corner. The stairs wind up inside a closed log shaft, so you're safe on the way up, to an open lookout 15 m up, above the treetops. From there you can see the other tower across the whole map and straight down the tree-free lane along your edge of the map. It's far from the action, but safe.
+
+### Dustyard (40 × 80 m)
+
+A sun-baked town with three routes (long, mid through arched doors with a catwalk, and a covered apartment corridor with a terrace on top) meeting in a central plaza with a well.
 
 ### Hosting on a LAN
 
@@ -68,16 +84,22 @@ Everyone, players and bots, wears a steel helmet. A shot to the **back** of the 
 ## Layout
 
 - `src/main.cpp`: menu, game loop, presentation of events, render passes
+- `src/world.*`: the map container (boxes plus size, spawns, scenery), a grid that speeds up collision and line-of-sight queries, Dustyard
+- `src/map_redoubt.cpp`: Redoubt: its layout, trees, roads and the painted ground
+- `src/scenery_mesh.*`: meshes for what isn't boxes (trees, the fort's curved walls, roofs, beams)
 - `src/game/session.*`: a game being played (offline, hosted or joined): host and client logic, prediction, reconciliation, interpolation
 - `src/game/sim.*`: the authoritative simulation (players, bots, shots, damage, respawns, lag compensation); no rendering or networking
 - `src/game/types.hpp`: commands, events and views shared by the simulation, the network and the renderer
 - `src/net/protocol.*`: message encoding and decoding (bounds-checked)
 - `src/net/transport.*`: the only code that touches ENet and sockets
 - `src/soldier.*`: third-person characters with their weapons (other players and bots)
-- `src/render.*`: lit shader, shadows, sky, merged level meshes
+- `src/render.*`: lit shader (with GPU skinning for characters and a blended terrain mode), shadows (following the player on big maps), sky, merged level meshes, culling
 - `src/effects.*`: particles, decals, tracers, muzzle flashes
 - `src/hud.*`: HUD, main menu, scoreboard, nameplates, kill feed
 - `src/audio.*`: sound playback and synthesized effects
 - `src/viewmodel.*`, `src/rifle_view.*`: first-person weapons (shared motion and arms, the revolver, the FAL)
 - `src/player.*`, `weapon.*`, `enemy.*`, `weapon_models.*`, `character.*`: gameplay and models
-- `tests/`: headless tests. `net_test` runs a real host and client over loopback.
+- `tests/`: headless tests. `net_test` runs a real host and client over loopback. `player_test` checks both maps: Redoubt is symmetric, everything is reachable on foot, and a simulated player climbs the tower and the house stairs.
+- `tools/make_textures.py`: generates the textures (run with Blender's Python).
+
+For performance checks, `fps.exe --offline --map redoubt --bots 4 --bench` prints the average and worst frame time over 300 frames with vsync off.

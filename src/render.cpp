@@ -1,7 +1,9 @@
 #include "render.hpp"
+#include "scenery_mesh.hpp"
 #include "raymath.h"
 #include "rlgl.h"
 #include <cstring>
+#include <algorithm>
 #include <vector>
 
 namespace Render {
@@ -23,9 +25,28 @@ static bool ready = false;
 static Shader lit{}, sky{};
 static RenderTexture2D shadowMap{};
 static Matrix lightVP = MatrixIdentity();
-// The level: one merged model per surface kind
-struct LevelPart { Model model; SurfaceLook look; };
+// The level: one merged model per surface kind (boxes), the scenery's models, the ground
+struct LevelPart {
+    Model model;
+    SurfaceLook look;
+    enum Kind { Boxes, Scenery, Leaves, Terrain } kind;
+    BoundingBox bounds = { { -1e6f, -1e6f, -1e6f }, { 1e6f, 1e6f, 1e6f } };
+    bool background = false;   // left out of the shadow pass
+};
+static Matrix cullVP = MatrixIdentity();   // the current pass's view-projection, for skipping what's off screen
+static Vector3 viewPos{};
+static std::vector<int> drawOrder;
 static std::vector<LevelPart> level;
+static Texture2D groundMask{};
+static Vector2 maskOrigin{}, maskSize{};
+static TerrainLook terrainLook;
+static float fogDensity = FOG_DENSITY;
+static bool inShadowPass = false;
+static bool shadowFollows = false;   // big maps: the shadow map covers the area round the camera
+static float shadowExtent = 96.0f;
+// GPU skinning: the bone attributes are only switched on while a character is drawn
+// (raylib would otherwise bind bone buffers for every mesh, and most have none)
+static int boneIdsLoc = -1, boneWeightsLoc = -1, boneMatricesLoc = -1;
 
 static int Loc(Shader s, const char* name) { return GetShaderLocation(s, name); }
 static void SetVec3(Shader s, const char* name, Vector3 v) { SetShaderValue(s, Loc(s, name), &v, SHADER_UNIFORM_VEC3); }
@@ -59,6 +80,14 @@ bool Init(const std::string& assetDir) {
     // raylib only looks these up for its own names; make sure DrawMesh feeds them
     lit.locs[SHADER_LOC_MATRIX_MODEL] = Loc(lit, "matModel");
     lit.locs[SHADER_LOC_MATRIX_NORMAL] = Loc(lit, "matNormal");
+    lit.locs[SHADER_LOC_MAP_ROUGHNESS] = Loc(lit, "texture3");  // the terrain's extra textures
+    lit.locs[SHADER_LOC_MAP_OCCLUSION] = Loc(lit, "texture4");
+    SetFloat(lit, "alphaCut", 0.0f);
+    boneIdsLoc = lit.locs[SHADER_LOC_VERTEX_BONEIDS];
+    boneWeightsLoc = lit.locs[SHADER_LOC_VERTEX_BONEWEIGHTS];
+    boneMatricesLoc = lit.locs[SHADER_LOC_BONE_MATRICES];
+    lit.locs[SHADER_LOC_VERTEX_BONEIDS] = lit.locs[SHADER_LOC_VERTEX_BONEWEIGHTS] = lit.locs[SHADER_LOC_BONE_MATRICES] = -1;
+    SetInt(lit, "skinned", 0);
     shadowMap = LoadDepthTarget(SHADOW_SIZE);
     SetFloat(lit, "shadowTexel", 1.0f / SHADOW_SIZE);
     for (int i = 0; i < 2; i++) SetFlashLight(i, { 0, 0, 0 }, { 0, 0, 0 }, 0.0f);
@@ -70,15 +99,21 @@ bool Init(const std::string& assetDir) {
 static void UnloadKeepTextures(Model& m) {
     // The level models borrow WorldMaterials' textures; don't let UnloadModel free them
     for (int i = 0; i < m.materialCount; i++)
-        for (int k = 0; k < 12; k++) // raylib's MAX_MATERIAL_MAPS m.materials[i].maps[k].texture = Texture2D{};
+        for (int k = 0; k < 12; k++) m.materials[i].maps[k].texture = Texture2D{}; // raylib's MAX_MATERIAL_MAPS
     for (int i = 0; i < m.materialCount; i++) m.materials[i].shader = Shader{ rlGetShaderIdDefault(), rlGetShaderLocsDefault() };
     UnloadModel(m);
     m = Model{};
 }
 
-void Shutdown() {
+static void ClearLevel() {
     for (LevelPart& p : level) UnloadKeepTextures(p.model);
     level.clear();
+    if (groundMask.id) UnloadTexture(groundMask);
+    groundMask = Texture2D{};
+}
+
+void Shutdown() {
+    ClearLevel();
     if (shadowMap.id) rlUnloadFramebuffer(shadowMap.id);
     if (shadowMap.depth.id) rlUnloadTexture(shadowMap.depth.id);
     if (IsShaderValid(lit)) UnloadShader(lit);
@@ -87,6 +122,23 @@ void Shutdown() {
 }
 
 bool Ready() { return ready; }
+
+bool BeginSkinned() {
+    if (!ready || boneIdsLoc < 0 || boneWeightsLoc < 0 || boneMatricesLoc < 0) return false;
+    rlDrawRenderBatchActive();
+    lit.locs[SHADER_LOC_VERTEX_BONEIDS] = boneIdsLoc;
+    lit.locs[SHADER_LOC_VERTEX_BONEWEIGHTS] = boneWeightsLoc;
+    lit.locs[SHADER_LOC_BONE_MATRICES] = boneMatricesLoc;
+    SetInt(lit, "skinned", 1);
+    return true;
+}
+
+void EndSkinned() {
+    if (!ready) return;
+    rlDrawRenderBatchActive();
+    lit.locs[SHADER_LOC_VERTEX_BONEIDS] = lit.locs[SHADER_LOC_VERTEX_BONEWEIGHTS] = lit.locs[SHADER_LOC_BONE_MATRICES] = -1;
+    SetInt(lit, "skinned", 0);
+}
 Shader LitShader() { return lit; }
 Vector3 SunDirection() { return SUN_DIR; }
 
@@ -165,45 +217,182 @@ static Model BuildModel(const std::vector<const WorldBox*>& boxes, bool withGrou
     return m;
 }
 
+static Model WrapMesh(Mesh mesh, Texture2D albedo, Texture2D rough, Texture2D normal) {
+    Model m = LoadModelFromMesh(mesh);
+    m.materials[0].shader = lit;
+    m.materials[0].maps[MATERIAL_MAP_ALBEDO].texture = albedo;
+    m.materials[0].maps[MATERIAL_MAP_METALNESS].texture = rough;
+    m.materials[0].maps[MATERIAL_MAP_NORMAL].texture = normal;
+    return m;
+}
+
+// The painted ground: one big quad (to the horizon), textured by the mask in the shader
+static void BuildTerrain(const Scenery::GroundMask& g, const WorldMaterials& mat) {
+    Image img = { (void*)g.rgba.data(), g.width, g.height, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    groundMask = LoadTextureFromImage(img);
+    SetTextureFilter(groundMask, TEXTURE_FILTER_BILINEAR);
+    SetTextureWrap(groundMask, TEXTURE_WRAP_CLAMP);
+    maskOrigin = g.origin;
+    maskSize = { g.width * g.cell, g.height * g.cell };
+    terrainLook = mat.terrain;
+    const float e = 1500.0f;
+    Mesh mesh{};
+    mesh.vertexCount = 4;
+    mesh.triangleCount = 2;
+    mesh.vertices = (float*)MemAlloc(12 * sizeof(float));
+    mesh.normals = (float*)MemAlloc(12 * sizeof(float));
+    mesh.texcoords = (float*)MemAlloc(8 * sizeof(float));
+    mesh.indices = (unsigned short*)MemAlloc(6 * sizeof(unsigned short));
+    const float v[] = { -e, 0, -e, -e, 0, e, e, 0, e, e, 0, -e };
+    const unsigned short idx[] = { 0, 1, 2, 0, 2, 3 };
+    for (int i = 0; i < 12; i++) mesh.vertices[i] = v[i];
+    for (int i = 0; i < 4; i++) {
+        mesh.normals[i * 3] = 0; mesh.normals[i * 3 + 1] = 1; mesh.normals[i * 3 + 2] = 0;
+        mesh.texcoords[i * 2] = 0; mesh.texcoords[i * 2 + 1] = 0;
+    }
+    for (int i = 0; i < 6; i++) mesh.indices[i] = idx[i];
+    UploadMesh(&mesh, false);
+    Model m = WrapMesh(mesh, mat.terrain.grass, mat.terrain.dirt, mat.terrain.field);
+    m.materials[0].maps[MATERIAL_MAP_ROUGHNESS].texture = mat.terrain.forest;
+    m.materials[0].maps[MATERIAL_MAP_OCCLUSION].texture = groundMask;
+    level.push_back({ m, SurfaceLook{}, LevelPart::Terrain });
+}
+
 void BuildLevel(const World& world, const WorldMaterials& mat) {
     if (!ready || !mat.loaded) return;
+    ClearLevel();
+    fogDensity = world.fogDensity;
+    shadowFollows = world.length > 120.0f;
+    shadowExtent = shadowFollows ? 150.0f : 96.0f;
+    const Scenery* sc = world.scenery.get();
+    bool paintedGround = sc && sc->hasGround;
     for (int s = 1; s < (int)Surface::Count; s++) {
         std::vector<const WorldBox*> boxes;
         for (const WorldBox& b : world)
-            if ((int)b.surface == s && !b.isTarget) boxes.push_back(&b);
-        bool ground = (Surface)s == Surface::Concrete; // the ground is paved
+            if ((int)b.surface == s && !b.isTarget && !b.Hidden()) boxes.push_back(&b);
+        bool ground = (Surface)s == Surface::Concrete && !paintedGround; // a paved ground (Dustyard)
         if (boxes.empty() && !ground) continue;
         const SurfaceLook& look = mat.Of((Surface)s);
-        level.push_back({ BuildModel(boxes, ground, look.albedo, look.rough, look.normal), look });
+        level.push_back({ BuildModel(boxes, ground, look.albedo, look.rough, look.normal), look, LevelPart::Boxes });
+    }
+    if (sc) {
+        SceneryMeshes meshes = BuildSceneryMeshes(*sc);
+        for (SceneryMeshes::Group& g : meshes.solids) {
+            const SurfaceLook& look = mat.Of(g.surface);
+            for (SceneryMeshes::Piece& p : g.pieces)
+                level.push_back({ WrapMesh(p.mesh, look.albedo, look.rough, look.normal), look, LevelPart::Scenery, p.bounds, p.background });
+        }
+        for (SceneryMeshes::Piece& p : meshes.leaves)
+            level.push_back({ WrapMesh(p.mesh, mat.leaves, Texture2D{}, Texture2D{}), SurfaceLook{}, LevelPart::Leaves, p.bounds, p.background });
+        if (paintedGround) BuildTerrain(sc->ground, mat);
     }
 }
 
+// Is any of the box inside the view volume of `vp`? (all corners outside one clip plane = no)
+static bool InView(const BoundingBox& b, const Matrix& vp) {
+    if (b.min.x < -1e5f) return true;
+    int outside[6] = { 0, 0, 0, 0, 0, 0 };
+    for (int i = 0; i < 8; i++) {
+        Vector3 p = { i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z };
+        float x = vp.m0 * p.x + vp.m4 * p.y + vp.m8 * p.z + vp.m12;
+        float y = vp.m1 * p.x + vp.m5 * p.y + vp.m9 * p.z + vp.m13;
+        float z = vp.m2 * p.x + vp.m6 * p.y + vp.m10 * p.z + vp.m14;
+        float w = vp.m3 * p.x + vp.m7 * p.y + vp.m11 * p.z + vp.m15;
+        outside[0] += x < -w; outside[1] += x > w;
+        outside[2] += y < -w; outside[3] += y > w;
+        outside[4] += z < -w; outside[5] += z > w;
+    }
+    for (int k = 0; k < 6; k++)
+        if (outside[k] == 8) return false;
+    return true;
+}
+
 void DrawLevel() {
-    for (const LevelPart& p : level) {
-        SurfaceWorldMapped(p.look.tile, p.look.specular, p.look.faceMapped);
-        DrawModel(p.model, { 0, 0, 0 }, 1.0f, p.look.tint);
+    // Nearest first, so the depth test throws away what's hidden behind (leaves especially)
+    drawOrder.clear();
+    for (int i = 0; i < (int)level.size(); i++) {
+        const LevelPart& p = level[i];
+        if (inShadowPass && p.background) continue;
+        if (!InView(p.bounds, cullVP)) continue;
+        drawOrder.push_back(i);
+    }
+    if (!inShadowPass) {
+        auto dist = [&](int i) {
+            const BoundingBox& b = level[i].bounds;
+            if (b.min.x < -1e5f) return 0.0f;
+            Vector3 c = Vector3Scale(Vector3Add(b.min, b.max), 0.5f);
+            return Vector3DistanceSqr(c, viewPos);
+        };
+        std::stable_sort(drawOrder.begin(), drawOrder.end(), [&](int a, int b) { return dist(a) < dist(b); });
+    }
+    for (int i : drawOrder) {
+        const LevelPart& p = level[i];
+        switch (p.kind) {
+            case LevelPart::Boxes:
+                SurfaceWorldMapped(p.look.tile, p.look.specular, p.look.faceMapped);
+                DrawModel(p.model, { 0, 0, 0 }, 1.0f, p.look.tint);
+                break;
+            case LevelPart::Scenery:
+                SurfacePbr(0.0f, 1.0f, true, true, 1.0f);
+                DrawModel(p.model, { 0, 0, 0 }, 1.0f, p.look.tint);
+                break;
+            case LevelPart::Leaves:
+                SurfaceObject(0.05f);
+                SetFloat(lit, "alphaCut", 0.5f);
+                rlDisableBackfaceCulling();
+                DrawModel(p.model, { 0, 0, 0 }, 1.0f, WHITE);
+                rlDrawRenderBatchActive();
+                rlEnableBackfaceCulling();
+                SetFloat(lit, "alphaCut", 0.0f);
+                break;
+            case LevelPart::Terrain: {
+                if (inShadowPass) break; // the ground only receives shadows
+                rlDrawRenderBatchActive();
+                SetInt(lit, "worldMapped", 0);
+                SetInt(lit, "materialMode", 2);
+                SetFloat(lit, "specular", 0.0f);
+                SetShaderValue(lit, Loc(lit, "maskOrigin"), &maskOrigin, SHADER_UNIFORM_VEC2);
+                SetShaderValue(lit, Loc(lit, "maskSize"), &maskSize, SHADER_UNIFORM_VEC2);
+                Vector4 tiles = { terrainLook.grassTile, terrainLook.dirtTile, terrainLook.fieldTile, terrainLook.forestTile };
+                SetShaderValue(lit, Loc(lit, "terrainTiles"), &tiles, SHADER_UNIFORM_VEC4);
+                DrawModel(p.model, { 0, 0, 0 }, 1.0f, WHITE);
+                break;
+            }
+        }
     }
     SurfaceObject(0.25f);
 }
 
 // --- Passes --------------------------------------------------------------------
 
-void BeginShadowPass() {
+void BeginShadowPass(Vector3 focus) {
     if (!ready) return;
-    // An orthographic "camera" at the sun, framing the whole arena
+    // An orthographic "camera" at the sun: framing the whole arena on a small map, or the
+    // ground round the player on a big one (moved in whole shadow-map texels, so the
+    // shadows' edges don't crawl as the player moves)
+    Vector3 target = { 0, 0, 0 };
+    if (shadowFollows) {
+        Vector3 f = SUN_DIR, r = Vector3Normalize(Vector3CrossProduct(f, { 0, 1, 0 })), u = Vector3CrossProduct(r, f);
+        float texel = shadowExtent / SHADOW_SIZE;
+        float a = roundf(Vector3DotProduct(focus, r) / texel) * texel, b = roundf(Vector3DotProduct(focus, u) / texel) * texel;
+        target = Vector3Add(Vector3Add(Vector3Scale(r, a), Vector3Scale(u, b)), Vector3Scale(f, Vector3DotProduct(focus, f)));
+    }
+    inShadowPass = true;
     Camera3D sun{};
-    sun.target = { 0, 0, 0 };
-    sun.position = Vector3Scale(SUN_DIR, -80.0f);
+    sun.target = target;
+    sun.position = Vector3Add(target, Vector3Scale(SUN_DIR, -80.0f));
     sun.up = { 0, 1, 0 };
-    sun.fovy = 96.0f; // ortho height in meters: covers the 40 x 80 m arena from this angle
+    sun.fovy = shadowExtent; // ortho height in meters
     sun.projection = CAMERA_ORTHOGRAPHIC;
     BeginTextureMode(shadowMap);
     ClearBackground(WHITE);
     BeginMode3D(sun);
     lightVP = MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection());
+    cullVP = lightVP;
 }
 
 void EndShadowPass() {
+    inShadowPass = false;
     if (!ready) return;
     EndMode3D();
     EndTextureMode();
@@ -247,8 +436,10 @@ static void SetCommonLighting(Vector3 sunDir, Vector3 viewPos, float fog, int sh
 
 void BeginWorldPass(const Camera3D& cam) {
     BeginMode3D(cam);
+    cullVP = MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection());
+    viewPos = cam.position;
     if (!ready) return;
-    SetCommonLighting(SUN_DIR, cam.position, FOG_DENSITY, 1, 1.0f, { 0, 1, 0 });
+    SetCommonLighting(SUN_DIR, cam.position, fogDensity, 1, 1.0f, { 0, 1, 0 });
     SetShaderValueMatrix(lit, Loc(lit, "lightVP"), lightVP);
     int slot = 10;
     rlActiveTextureSlot(slot);

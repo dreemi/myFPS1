@@ -764,6 +764,145 @@ int main() {
         CHECK(over.feet.x < 19.5f, "the town wall can't be jumped, even from the terrace (x %.2f)", over.feet.x);
     }
 
+    std::printf("Redoubt\n");
+    {
+        World w = BuildRedoubt();
+        int trees = 0, playable = 0;
+        if (w.scenery) for (const Scenery::Tree& t : w.scenery->trees) { trees++; playable += !t.background; }
+        std::printf("  (%d boxes, %d trees of which %d in play)\n", (int)w.size(), trees, playable);
+        CHECK(w.map == MapId::Redoubt && w.length >= 200.0f && w.width >= 50.0f, "a big map (%.0f x %.0f m)", w.width, w.length);
+        CHECK(playable > 250, "a real forest: %d trees in play", playable);
+
+        // The two halves are the same map turned half a circle (the boundary is its own twin)
+        int unmatched = 0;
+        for (const WorldBox& a : w) {
+            bool found = false;
+            for (const WorldBox& b : w)
+                if (fabsf(a.position.x + b.position.x) < 1e-3f && fabsf(a.position.y - b.position.y) < 1e-3f &&
+                    fabsf(a.position.z + b.position.z) < 1e-3f && Vector3Equals(a.size, b.size) && a.surface == b.surface) {
+                    found = true;
+                    break;
+                }
+            if (!found) unmatched++;
+        }
+        CHECK(unmatched == 0, "both sides get the same map (%d boxes without a twin)", unmatched);
+
+        // The grid answers the same as checking every box
+        int mismatches = 0;
+        unsigned seed = 7;
+        auto rnd = [&](float lo, float hi) { seed = seed * 1664525u + 1013904223u; return lo + (hi - lo) * ((seed >> 8) & 0xffff) / 65535.0f; };
+        for (int i = 0; i < 3000; i++) {
+            Vector3 a = { rnd(-34, 34), rnd(0.1f, 18), rnd(-122, 122) }, b = { rnd(-34, 34), rnd(0.1f, 18), rnd(-122, 122) };
+            bool brute = true;
+            Vector3 d = Vector3Subtract(b, a);
+            float len = Vector3Length(d);
+            Ray ray = { a, Vector3Scale(d, 1.0f / len) };
+            float nearest = 1e9f;
+            for (const WorldBox& box : w) {
+                if (!box.StopsBullets()) continue;
+                RayCollision c = GetRayCollisionBox(ray, box.Bounds());
+                if (c.hit && c.distance < len) brute = false;
+                if (c.hit && c.distance < nearest) nearest = c.distance;
+            }
+            if (brute != HasLineOfSight(a, b, w)) mismatches++;
+            WorldHit h = TraceWorld(ray, w, 400.0f);
+            float ground = ray.direction.y < -1e-4f ? -a.y / ray.direction.y : 1e9f;
+            float expect = fminf(fminf(nearest, ground), 400.0f);
+            if (fabsf((h.hit ? h.distance : 400.0f) - expect) > 1e-3f) mismatches++;
+            bool bruteHit = false;
+            for (const WorldBox& box : w) {
+                BoundingBox bb = box.Bounds();
+                if (bb.max.y <= a.y + 0.05f || bb.min.y >= a.y + 1.8f) continue;
+                if (a.x > bb.min.x - 0.4f && a.x < bb.max.x + 0.4f && a.z > bb.min.z - 0.4f && a.z < bb.max.z + 0.4f) bruteHit = true;
+            }
+            if (bruteHit != CylinderCollides(a, 0.4f, 1.8f, w)) mismatches++;
+        }
+        CHECK(mismatches == 0, "the speed-up grid agrees with checking every box (%d mismatches in 9000 queries)", mismatches);
+
+        const Vector3 spawnA = w.spawns[0].position, spawnB = w.spawns[1].position;
+        CHECK(fabsf(spawnA.z - spawnB.z) > 200.0f, "spawns at opposite ends (z %.0f and %.0f)", spawnA.z, spawnB.z);
+        CHECK(!CylinderCollides(spawnA, 0.35f, 1.8f, w) && !CylinderCollides(spawnB, 0.35f, 1.8f, w), "spawns are clear to stand in");
+        CHECK(!HasLineOfSight(Vector3Add(spawnA, { 0, 1.7f, 0 }), Vector3Add(spawnB, { 0, 1.7f, 0 }), w), "the spawns can't see each other");
+
+        // On foot, at ground level: everything that matters joins up (1 m grid)
+        {
+            const float cell = 1.0f;
+            const int nx = (int)(w.width / cell), nz = (int)(w.length / cell);
+            auto at = [&](int i, int k) { return Vector3{ -w.width / 2 + (i + 0.5f) * cell, 0, -w.length / 2 + (k + 0.5f) * cell }; };
+            auto cellOf = [&](Vector3 p) { return (int)((p.x + w.width / 2) / cell) * nz + (int)((p.z + w.length / 2) / cell); };
+            std::vector<char> seen(nx * nz, 0);
+            std::vector<int> queue = { cellOf(spawnA) };
+            seen[queue[0]] = 1;
+            for (size_t q = 0; q < queue.size(); q++) {
+                int i = queue[q] / nz, k = queue[q] % nz;
+                const int di[] = { 1, -1, 0, 0 }, dk[] = { 0, 0, 1, -1 };
+                for (int d = 0; d < 4; d++) {
+                    int a = i + di[d], b = k + dk[d];
+                    if (a < 0 || b < 0 || a >= nx || b >= nz || seen[a * nz + b]) continue;
+                    if (CylinderCollides(at(a, b), 0.35f, 1.8f, w)) continue;
+                    seen[a * nz + b] = 1;
+                    queue.push_back(a * nz + b);
+                }
+            }
+            auto reach = [&](Vector3 p) { int c = cellOf(p); return c >= 0 && c < nx * nz && seen[c]; };
+            CHECK(reach(spawnB), "team A can walk to team B's spawn");
+            CHECK(reach({ 0.5f, 0, -9.5f }) && reach({ -0.5f, 0, 9.5f }), "into the fort from both gates' sides");
+            int unreachable = 0;
+            for (Vector3 h : w.hotspots) unreachable += !reach(h);
+            CHECK(unreachable == 0, "every place bots head for can be walked to (%d can't)", unreachable);
+            CHECK(reach({ -27.5f, 0, -91.0f }) && reach({ 27.5f, 0, 91.0f }), "both towers' doors");
+            CHECK(reach({ 10.5f, 0, -23.5f }) && reach({ 7.5f, 0, -30.5f }), "the house's doors (and in)");
+            CHECK(reach({ 21.0f, 0, 25.0f }), "the checkpoint hut's door");
+        }
+
+        // Walking a path of waypoints (steering at each in turn); returns where it got to
+        auto walkPath = [&](Vector3 start, std::vector<Vector2> points, float maxTime) {
+            Player p;
+            p.Init(start, 0.0f);
+            Settle(p, w);
+            size_t next = 0;
+            for (int f = 0; f < (int)(maxTime / DT) && next < points.size(); f++) {
+                Vector3 feet = p.GetFeet();
+                float dx = points[next].x - feet.x, dz = points[next].y - feet.z;
+                if (dx * dx + dz * dz < 0.15f * 0.15f) { next++; continue; }
+                PlayerInput in;
+                in.forward = true;
+                in.hasAim = true;
+                in.aimYaw = atan2f(dx, dz);
+                in.aimPitch = 0.0f;
+                p.Simulate(DT, in, w);
+            }
+            return p;
+        };
+        {
+            const float cx = -27.5f, cz = -86.0f, c = 2.2f;
+            Player top = walkPath({ cx - 2.2f, 0, cz - 5.0f },
+                                  { { cx - c, cz - 3.4f }, { cx - c, cz - c }, { cx + c, cz - c }, { cx + c, cz + c }, { cx - c, cz + c },
+                                    { cx - c, cz - c }, { cx + c, cz - c }, { cx + c, cz + c }, { cx + 0.5f, cz + 2.6f }, { cx, cz } },
+                                  60.0f);
+            CHECK(top.GetFeet().y > 14.9f, "the tower's stairs climb to the lookout (feet at %.2f m)", top.GetFeet().y);
+            Vector3 eye = Vector3Add(top.GetFeet(), { 0, 1.7f, 0 });
+            CHECK(HasLineOfSight(eye, { 27.5f, 16.7f, 86.0f }, w), "from the lookout you can see the other tower over the trees");
+            CHECK(HasLineOfSight({ cx - 1.0f, 16.7f, cz + 3.0f }, { -28.8f, 1.0f, -15.0f }, w), "and down the lane along the edge");
+        }
+        {
+            Player up = walkPath({ 3.5f, 0, -30.3f },
+                                 { { 7.2f, -30.3f }, { 7.0f, -33.05f }, { 12.6f, -33.05f }, { 13.2f, -31.0f }, { 11.0f, -28.0f } }, 20.0f);
+            CHECK(up.GetFeet().y > 3.1f, "the house's stairs reach the upper floor (feet at %.2f m)", up.GetFeet().y);
+        }
+        {
+            // The fort's fire step: up two steps to look over the wall
+            float a = PI - 0.3f; // a stretch of wall between A's gate and the loophole
+            Vector3 inside = { sinf(a) * 8.0f, 0, cosf(a) * 8.0f };
+            Player p = walkPath(inside, { { sinf(a) * 10.95f, cosf(a) * 10.95f } }, 4.0f);
+            CHECK(p.GetFeet().y > 0.85f, "the fort's fire step can be climbed (feet at %.2f m)", p.GetFeet().y);
+            Vector3 eye = Vector3Add(p.GetFeet(), { 0, 1.7f, 0 });
+            Vector3 out = { sinf(a) * 30.0f, 1.0f, cosf(a) * 30.0f };
+            CHECK(HasLineOfSight(eye, out, w), "and from it you can see out over the wall");
+            CHECK(!HasLineOfSight({ inside.x, 1.7f, inside.z }, out, w), "but not standing in the yard");
+        }
+    }
+
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

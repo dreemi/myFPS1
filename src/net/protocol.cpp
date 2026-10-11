@@ -89,6 +89,7 @@ std::vector<uint8_t> EncodeWelcome(const Welcome& wel) {
     w.U8(MSG_WELCOME);
     w.U8(wel.id);
     w.F32(wel.time);
+    w.U8(wel.map);
     return w.data;
 }
 
@@ -97,7 +98,8 @@ bool DecodeWelcome(const std::vector<uint8_t>& msg, Welcome& out) {
     if (r.U8() != MSG_WELCOME) return false;
     out.id = r.U8();
     out.time = r.F32();
-    return r.ok && out.id < MAX_PLAYERS;
+    out.map = r.U8();
+    return r.ok && out.id < MAX_PLAYERS && out.map < (uint8_t)MapId::Count;
 }
 
 std::vector<uint8_t> EncodeReject(const std::string& reason) {

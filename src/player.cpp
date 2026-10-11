@@ -105,20 +105,20 @@ bool Player::CollidesAt(Vector3 pos, const World& world) const {
 // Highest surface under the player that is at or below their feet
 float Player::FloorBelow(Vector3 pos, const World& world) const {
     float floor = 0.0f; // the ground plane
-    for (const WorldBox& box : world) {
-        BoundingBox b = box.Bounds();
+    world.ForEachNear(pos.x - radius, pos.x + radius, pos.z - radius, pos.z + radius, [&](int i) {
+        BoundingBox b = world[i].Bounds();
         if (b.max.y <= pos.y + 0.05f && b.max.y > floor && OverlapsXZ(pos, b)) floor = b.max.y;
-    }
+    });
     return floor;
 }
 
 // Lowest surface above the player's head
 float Player::CeilingAbove(Vector3 pos, const World& world) const {
     float ceiling = 1e9f;
-    for (const WorldBox& box : world) {
-        BoundingBox b = box.Bounds();
+    world.ForEachNear(pos.x - radius, pos.x + radius, pos.z - radius, pos.z + radius, [&](int i) {
+        BoundingBox b = world[i].Bounds();
         if (b.min.y >= pos.y + GetHeight() - 0.05f && b.min.y < ceiling && OverlapsXZ(pos, b)) ceiling = b.min.y;
-    }
+    });
     return ceiling;
 }
 

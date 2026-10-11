@@ -2,24 +2,100 @@
 #include "raymath.h"
 #include <utility>
 
-bool CylinderCollides(Vector3 pos, float radius, float height, const World& world) {
-    for (const WorldBox& box : world) {
-        BoundingBox b = box.Bounds();
-        // Skip boxes entirely above the head or below the feet
-        if (b.max.y <= pos.y + 0.05f || b.min.y >= pos.y + height) continue;
-        // Circle on the XZ plane against the box footprint
-        if (pos.x > b.min.x - radius && pos.x < b.max.x + radius &&
-            pos.z > b.min.z - radius && pos.z < b.max.z + radius) {
-            return true;
-        }
+#include <algorithm>
+#include <cmath>
+
+const char* MapName(MapId id) {
+    switch (id) {
+        case MapId::Redoubt: return "REDOUBT";
+        case MapId::Dustyard: return "DUSTYARD";
+        default: return "?";
     }
-    return false;
+}
+
+World BuildMap(MapId id) {
+    return id == MapId::Dustyard ? BuildTestWorld() : BuildRedoubt();
+}
+
+// --- The grid ---------------------------------------------------------------------
+
+const WorldGrid& World::Grid() const {
+    if (grid && gridData == data() && gridCount == size()) return *grid;
+    auto g = std::make_shared<WorldGrid>();
+    gridData = data();
+    gridCount = size();
+    grid = g;
+    if (empty()) return *g;
+    float x0 = 1e30f, x1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
+    for (const WorldBox& b : *this) {
+        BoundingBox bb = b.Bounds();
+        x0 = std::min(x0, bb.min.x); x1 = std::max(x1, bb.max.x);
+        z0 = std::min(z0, bb.min.z); z1 = std::max(z1, bb.max.z);
+    }
+    g->x0 = x0 - 0.5f;
+    g->z0 = z0 - 0.5f;
+    g->nx = std::min(512, (int)((x1 + 0.5f - g->x0) / g->cell) + 1);
+    g->nz = std::min(512, (int)((z1 + 0.5f - g->z0) / g->cell) + 1);
+    auto range = [&](const WorldBox& b, int& i0, int& i1, int& k0, int& k1) {
+        BoundingBox bb = b.Bounds();
+        i0 = std::clamp((int)((bb.min.x - g->x0) / g->cell), 0, g->nx - 1);
+        i1 = std::clamp((int)((bb.max.x - g->x0) / g->cell), 0, g->nx - 1);
+        k0 = std::clamp((int)((bb.min.z - g->z0) / g->cell), 0, g->nz - 1);
+        k1 = std::clamp((int)((bb.max.z - g->z0) / g->cell), 0, g->nz - 1);
+    };
+    std::vector<int> count(g->nx * g->nz + 1, 0);
+    for (const WorldBox& b : *this) {
+        int i0, i1, k0, k1;
+        range(b, i0, i1, k0, k1);
+        for (int i = i0; i <= i1; i++)
+            for (int k = k0; k <= k1; k++) count[i * g->nz + k]++;
+    }
+    g->start.assign(g->nx * g->nz + 1, 0);
+    for (int c = 0; c < g->nx * g->nz; c++) g->start[c + 1] = g->start[c] + count[c];
+    g->items.assign(g->start.back(), 0);
+    std::vector<int> fill(g->start.begin(), g->start.end() - 1);
+    for (int n = 0; n < (int)size(); n++) {
+        int i0, i1, k0, k1;
+        range((*this)[n], i0, i1, k0, k1);
+        for (int i = i0; i <= i1; i++)
+            for (int k = k0; k <= k1; k++) g->items[fill[i * g->nz + k]++] = n;
+    }
+    g->stamp.assign(size(), 0);
+    return *g;
+}
+
+// --- Questions about the world ------------------------------------------------------
+
+bool CylinderCollides(Vector3 pos, float radius, float height, const World& world) {
+    bool hit = false;
+    world.ForEachNear(pos.x - radius, pos.x + radius, pos.z - radius, pos.z + radius, [&](int i) {
+        if (hit) return;
+        BoundingBox b = world[i].Bounds();
+        // Skip boxes entirely above the head or below the feet
+        if (b.max.y <= pos.y + 0.05f || b.min.y >= pos.y + height) return;
+        // Circle on the XZ plane against the box footprint
+        if (pos.x > b.min.x - radius && pos.x < b.max.x + radius && pos.z > b.min.z - radius && pos.z < b.max.z + radius)
+            hit = true;
+    });
+    return hit;
+}
+
+float FloorUnder(Vector3 p, float radius, const World& world) {
+    float floor = 0.0f;
+    world.ForEachNear(p.x - radius, p.x + radius, p.z - radius, p.z + radius, [&](int i) {
+        BoundingBox b = world[i].Bounds();
+        if (b.max.y <= p.y + 0.05f && b.max.y > floor && p.x > b.min.x - radius && p.x < b.max.x + radius &&
+            p.z > b.min.z - radius && p.z < b.max.z + radius)
+            floor = b.max.y;
+    });
+    return floor;
 }
 
 WorldHit TraceWorld(Ray ray, const World& world, float maxDistance) {
     WorldHit h;
     h.distance = maxDistance;
-    for (size_t i = 0; i < world.size(); i++) {
+    world.ForEachOnRay(ray, maxDistance, [&](int i) {
+        if (!world[i].StopsBullets()) return h.distance;
         RayCollision c = GetRayCollisionBox(ray, world[i].Bounds());
         if (c.hit && c.distance < h.distance) {
             h.hit = true;
@@ -27,9 +103,10 @@ WorldHit TraceWorld(Ray ray, const World& world, float maxDistance) {
             h.point = c.point;
             h.normal = c.normal;
             h.surface = world[i].surface;
-            h.box = (int)i;
+            h.box = i;
         }
-    }
+        return h.distance;
+    });
     if (ray.direction.y < -1e-4f) {
         float t = -ray.position.y / ray.direction.y;
         if (t > 0.0f && t < h.distance) {
@@ -37,7 +114,7 @@ WorldHit TraceWorld(Ray ray, const World& world, float maxDistance) {
             h.distance = t;
             h.point = Vector3Add(ray.position, Vector3Scale(ray.direction, t));
             h.normal = { 0, 1, 0 };
-            h.surface = Surface::Concrete;
+            h.surface = world.ground;
             h.box = -1;
         }
     }
@@ -49,12 +126,15 @@ bool HasLineOfSight(Vector3 from, Vector3 to, const World& world) {
     float dist = Vector3Length(delta);
     if (dist < 1e-4f) return true;
     Ray ray = { from, Vector3Scale(delta, 1.0f / dist) };
-    for (const WorldBox& box : world) {
-        if (box.isTarget) continue;
+    bool blocked = false;
+    world.ForEachOnRay(ray, dist, [&](int i) {
+        const WorldBox& box = world[i];
+        if (box.isTarget || !box.StopsBullets()) return dist;
         RayCollision hit = GetRayCollisionBox(ray, box.Bounds());
-        if (hit.hit && hit.distance < dist) return false;
-    }
-    return true;
+        if (hit.hit && hit.distance < dist) { blocked = true; return -1.0f; }
+        return dist;
+    });
+    return !blocked;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +331,15 @@ World BuildTestWorld() {
     m.Crate(-15.5f, -4.0f, 1.2f, 0.9f);
     m.Crate(4.5f, -6.5f, 1.0f);
     m.Crate(15.0f, -3.0f, 1.1f);
+
+    m.w.map = MapId::Dustyard;
+    m.w.width = ARENA_WIDTH;
+    m.w.length = ARENA_LENGTH;
+    m.w.spawns = GetSpawnPoints();
+    m.w.hotspots = { { 0, 0, 0 }, { -15, 0, -18 }, { 15, 0, 18 }, { 0, 0, -20 }, { 0, 0, 20 }, { 16, 0, -16 }, { -16, 0, 16 } };
+    m.w.ground = Surface::Concrete;
+    m.w.fogDensity = 0.006f;
+    m.w.botSight = 30.0f;
     return m.w;
 }
 

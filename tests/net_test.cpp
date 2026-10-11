@@ -259,7 +259,8 @@ int main() {
 
         SessionConfig oc;
         oc.bots = 2;
-        Session offline(SessionMode::Offline, world, oc);
+        oc.map = MapId::Dustyard;
+        Session offline(SessionMode::Offline, oc);
         int botRows = 0;
         for (const ScoreRow& r : offline.Scoreboard()) if (r.bot) botRows++;
         CHECK(botRows == 2, "the scoreboard lists the bots (%d)", botRows);
@@ -292,18 +293,20 @@ int main() {
         hc.name = "Host";
         hc.port = port;
         hc.bots = 1;
-        Session host(SessionMode::Host, world, hc);
+        hc.map = MapId::Dustyard;
+        Session host(SessionMode::Host, hc);
         CHECK(host.State() == SessionState::Playing && host.Local(), "the host is playing straight away");
 
         SessionConfig taken = hc;
-        Session second(SessionMode::Host, world, taken);
+        Session second(SessionMode::Host, taken);
         CHECK(second.State() == SessionState::Failed, "a second host on the same port fails cleanly: %s", second.StatusText().c_str());
 
         SessionConfig cc;
         cc.name = "Guest";
         cc.address = "127.0.0.1";
         cc.port = port;
-        Session client(SessionMode::Client, world, cc);
+        cc.map = MapId::Dustyard;
+        Session client(SessionMode::Client, cc);
         for (int i = 0; i < 300 && client.State() == SessionState::Connecting; i++) Pump(host, &client, DT);
         CHECK(client.State() == SessionState::Playing && client.Local(), "the client connects: %s", client.StatusText().c_str());
         Pump(host, &client, 0.5f);
@@ -343,12 +346,12 @@ int main() {
         // Join a port nobody's hosting on: fails after the timeout, without crashing
         SessionConfig nobody = cc;
         nobody.port = port + 1;
-        Session lost(SessionMode::Client, world, nobody);
+        Session lost(SessionMode::Client, nobody);
         for (int i = 0; i < 500 && lost.State() == SessionState::Connecting; i++) Pump(lost, nullptr, DT);
         CHECK(lost.State() == SessionState::Failed, "joining nobody fails: %s", lost.StatusText().c_str());
 
         // The host stops: a connected client is told
-        Session again(SessionMode::Client, world, cc);
+        Session again(SessionMode::Client, cc);
         for (int i = 0; i < 300 && again.State() == SessionState::Connecting; i++) Pump(host, &again, DT);
         CHECK(again.State() == SessionState::Playing, "a client can join again");
         host.Leave();

@@ -31,6 +31,7 @@ struct SessionConfig {
     std::string address = "127.0.0.1";   // joining
     uint16_t port = 27015;
     int bots = 1;                         // hosting / offline
+    MapId map = MapId::Redoubt;           // hosting / offline (a client gets the host's)
 };
 
 // One frame of the local player's intent, from the keyboard and mouse
@@ -43,13 +44,15 @@ struct LocalInput {
 
 class Session {
 public:
-    Session(SessionMode mode, const World& world, const SessionConfig& config);
+    Session(SessionMode mode, const SessionConfig& config);
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
 
     SessionMode Mode() const { return mode; }
     SessionState State() const { return state; }
+    // The map being played; null until a client hears which one from the host
+    const World* GetWorld() const { return haveWorld ? &world : nullptr; }
     const std::string& StatusText() const { return status; }
 
     void Update(float dt, const LocalInput& input);
@@ -89,7 +92,8 @@ private:
     SessionState state = SessionState::Connecting;
     std::string status;
     SessionConfig config;
-    const World& world;
+    World world;
+    bool haveWorld = false;
     std::unique_ptr<Net::Transport> transport;
     std::vector<GameEvent> pending;   // events waiting to be presented
     std::vector<SoldierView> others, botViews;

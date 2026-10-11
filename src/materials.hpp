@@ -13,9 +13,18 @@ struct SurfaceLook {
     Color tint = WHITE;      // multiplies the colour map (painted wood)
 };
 
+// The ground's textures on maps with a painted ground (Scenery::GroundMask): each
+// tiles in world space, blended by the mask
+struct TerrainLook {
+    Texture2D grass{}, dirt{}, field{}, forest{};
+    float grassTile = 3.0f, dirtTile = 3.0f, fieldTile = 4.0f, forestTile = 3.0f;
+};
+
 // Textures for the world's surfaces
 struct WorldMaterials {
     SurfaceLook surfaces[(int)Surface::Count];
+    TerrainLook terrain;
+    Texture2D leaves{};      // leaf clusters with alpha, for tree crowns
     bool loaded = false;
     const SurfaceLook& Of(Surface s) const { return surfaces[(int)s]; }
 };

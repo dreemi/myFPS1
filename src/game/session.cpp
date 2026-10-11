@@ -10,7 +10,7 @@ using namespace Proto;
 static const float SNAPSHOT_INTERVAL = 1.0f / 30.0f;
 static const float CONNECT_TIMEOUT = 6.0f;
 
-Session::Session(SessionMode m, const World& w, const SessionConfig& cfg) : mode(m), config(cfg), world(w) {
+Session::Session(SessionMode m, const SessionConfig& cfg) : mode(m), config(cfg) {
     if (config.name.empty()) config.name = "Player";
     if (mode == SessionMode::Client) {
         transport = std::make_unique<Net::Transport>();
@@ -22,6 +22,8 @@ Session::Session(SessionMode m, const World& w, const SessionConfig& cfg) : mode
         status = "Connecting to " + config.address + ":" + std::to_string(config.port) + "...";
         return;
     }
+    world = BuildMap(config.map);
+    haveWorld = true;
     sim = std::make_unique<GameSim>(world, config.bots, (unsigned)GetRandomValue(1, 1 << 30));
     local = sim->AddPlayer(config.name);
     localId = local->id;
@@ -223,7 +225,7 @@ void Session::HostReceive() {
                 continue;
             }
             peerPlayer[e.peer] = p->id;
-            transport->Send(e.peer, EncodeWelcome({ p->id, sim->Time() }), true);
+            transport->Send(e.peer, EncodeWelcome({ p->id, sim->Time(), (uint8_t)config.map }), true);
             BroadcastRoster();
         } else if (type == MSG_INPUT && known != peerPlayer.end()) {
             std::vector<PlayerCommand> cmds;
@@ -302,6 +304,9 @@ void Session::ClientReceive() {
         case MSG_WELCOME: {
             Welcome w;
             if (!DecodeWelcome(e.data, w) || state != SessionState::Connecting) break;
+            config.map = (MapId)w.map;
+            world = BuildMap(config.map);
+            haveWorld = true;
             localId = w.id;
             predicted = std::make_unique<SimPlayer>(localId, config.name, (unsigned)GetRandomValue(1, 1 << 30));
             local = predicted.get();

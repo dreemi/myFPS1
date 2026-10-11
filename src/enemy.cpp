@@ -29,23 +29,12 @@ ShotTrace TraceShotAtPlayer(Ray ray, const EnemyTarget& target, const World& wor
     const float maxRange = 100.0f;
     float wallDist = maxRange;
     ShotTrace result;
-    for (const WorldBox& box : world) {
-        RayCollision hit = GetRayCollisionBox(ray, box.Bounds());
-        if (hit.hit && hit.distance < wallDist) {
-            wallDist = hit.distance;
-            result.hitWorld = true;
-            result.normal = hit.normal;
-            result.surface = box.surface;
-        }
-    }
-    if (ray.direction.y < -1e-4f) { // the ground
-        float t = -ray.position.y / ray.direction.y;
-        if (t > 0.0f && t < wallDist) {
-            wallDist = t;
-            result.hitWorld = true;
-            result.normal = { 0, 1, 0 };
-            result.surface = Surface::Concrete;
-        }
+    WorldHit wall = TraceWorld(ray, world, maxRange);
+    if (wall.hit) {
+        wallDist = wall.distance;
+        result.hitWorld = true;
+        result.normal = wall.normal;
+        result.surface = wall.surface;
     }
     result.end = Vector3Add(ray.position, Vector3Scale(ray.direction, wallDist));
     if (!target.alive) return result;
@@ -77,8 +66,16 @@ Vector3 Enemy::RandomOpenPoint(const World& world) {
     const float margin = 3.0f;
     Vector3 p = feet;
     for (int i = 0; i < 100; i++) {
-        p = { Rand(-ARENA_WIDTH / 2 + margin, ARENA_WIDTH / 2 - margin), 0.0f,
-              Rand(-ARENA_LENGTH / 2 + margin, ARENA_LENGTH / 2 - margin) };
+        if (!world.hotspots.empty() && Rand(0.0f, 1.0f) < hotspotBias) {
+            // Somewhere around one of the places fights happen
+            const Vector3& h = world.hotspots[(size_t)Rand(0.0f, (float)world.hotspots.size() - 0.001f)];
+            float a = Rand(0.0f, 2.0f * PI), r = Rand(0.0f, 9.0f);
+            p = { Clamp(h.x + sinf(a) * r, -world.width / 2 + margin, world.width / 2 - margin), 0.0f,
+                  Clamp(h.z + cosf(a) * r, -world.length / 2 + margin, world.length / 2 - margin) };
+        } else {
+            p = { Rand(-world.width / 2 + margin, world.width / 2 - margin), 0.0f,
+                  Rand(-world.length / 2 + margin, world.length / 2 - margin) };
+        }
         if (!CylinderCollides(p, radius + 0.5f, height, world)) return p;
     }
     return p;
@@ -269,7 +266,7 @@ void Enemy::PlanPosition(const World& world) {
         float angle = Rand(0.0f, 2.0f * PI);
         float r = Rand(minMove, planRadius); // always actually moves somewhere new
         Vector3 p = { feet.x + sinf(angle) * r, 0.0f, feet.z + cosf(angle) * r };
-        if (fabsf(p.x) > ARENA_WIDTH / 2 - 1.0f || fabsf(p.z) > ARENA_LENGTH / 2 - 1.0f) continue;
+        if (fabsf(p.x) > world.width / 2 - 1.0f || fabsf(p.z) > world.length / 2 - 1.0f) continue;
         if (CylinderCollides(p, radius + 0.1f, height, world)) continue;
         if (!PathWalkable(feet, p, world)) continue;
 
@@ -331,7 +328,7 @@ void Enemy::Update(float dt, const EnemyTarget& target, const World& world) {
 
     // Can it see the player?
     Vector3 eye = Eye();
-    bool sees = target.alive && Vector3Distance(eye, target.eye) < sightRange &&
+    bool sees = target.alive && Vector3Distance(eye, target.eye) < fmaxf(sightRange, world.botSight) &&
                 HasLineOfSight(eye, target.eye, world);
     if (sees) {
         alertTimer = alertMemory;

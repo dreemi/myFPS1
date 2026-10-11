@@ -183,13 +183,16 @@ ShotResult Weapon::Resolve(Ray ray, Vector3 shooter, World& world, std::vector<E
     RayCollision closestHit = { 0 };
     closestHit.distance = 1e9f;
 
-    for (WorldBox& box : world) {
+    world.ForEachOnRay(ray, closestHit.distance, [&](int i) {
+        WorldBox& box = world[i];
+        if (!box.StopsBullets()) return closestHit.distance;
         RayCollision hit = GetRayCollisionBox(ray, box.Bounds());
         if (hit.hit && hit.distance < closestHit.distance) {
             closestHit = hit;
             closest = &box;
         }
-    }
+        return closestHit.distance;
+    });
     // The ground stops bullets too
     bool ground = false;
     if (ray.direction.y < -1e-4f) {

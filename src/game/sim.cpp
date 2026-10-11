@@ -183,7 +183,7 @@ Vector3 GameSim::BotFeetAt(int index, float t, bool* alive) const {
 // GameSim
 // ===========================================================================
 
-GameSim::GameSim(const World& w, int botCount, unsigned s) : world(w), spawns(GetSpawnPoints()), seed(s) {
+GameSim::GameSim(const World& w, int botCount, unsigned s) : world(w), spawns(w.spawns.empty() ? GetSpawnPoints() : w.spawns), seed(s) {
     for (int i = 0; i < botCount; i++) {
         bots.emplace_back(seed * 7919u + (unsigned)i * 104729u + 1u);
         bots.back().Spawn(spawns[i % spawns.size()].position, world);

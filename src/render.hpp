@@ -18,13 +18,18 @@ bool Ready();
 Shader LitShader();
 void ApplyLitShader(Model& model);  // light a loaded model (characters, guns)
 void DetachLitShader(Model& model); // before UnloadModel, so the shared shader isn't freed with it
+// Skinned meshes (characters) drawn between these are posed by the GPU from their
+// meshes' boneMatrices. Begin returns false if that isn't available (pose on the CPU).
+bool BeginSkinned();
+void EndSkinned();
 
-// The level's boxes, merged into one static mesh per material, plus the ground
+// The level's boxes, merged into one static mesh per material, its scenery (trees,
+// round walls, roofs) and the ground. Building again replaces the previous level.
 void BuildLevel(const World& world, const WorldMaterials& materials);
 void DrawLevel();       // inside a world or shadow pass
 
 // 1. Shadow pass: draw shadow casters between these (inside, the camera is the sun)
-void BeginShadowPass();
+void BeginShadowPass(Vector3 focus = { 0, 0, 0 }); // focus: where the camera is (big maps)
 void EndShadowPass();
 
 // 2. Sky (call after BeginDrawing, before the world)

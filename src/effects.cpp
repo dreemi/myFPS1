@@ -179,10 +179,12 @@ void Impact(Vector3 point, Vector3 normal, Surface surface) {
     if (!ready) return;
     Vector3 at = Vector3Add(point, Vector3Scale(normal, 0.02f));
     bool steel = surface == Surface::Steel;
-    bool wood = surface == Surface::Wood || surface == Surface::Crate || surface == Surface::Painted;
+    bool wood = surface == Surface::Wood || surface == Surface::Crate || surface == Surface::Painted ||
+                surface == Surface::Logs || surface == Surface::Shingles || surface == Surface::Bark;
+    bool earth = surface == Surface::Dirt;
 
     // Sparks: lots off steel, a few off stone, none off wood
-    int sparks = steel ? 14 : (wood ? 0 : 4);
+    int sparks = steel ? 14 : (wood || earth ? 0 : 4);
     for (int i = 0; i < sparks; i++) {
         Vector3 d = RandAround(normal, 0.9f);
         float s = Rand(4.0f, steel ? 11.0f : 7.0f);
@@ -199,6 +201,8 @@ void Impact(Vector3 point, Vector3 normal, Surface surface) {
     else if (wood) dust = { 140, 112, 80, 255 };
     else if (surface == Surface::Plaster) dust = { 205, 195, 175, 255 };
     else if (surface == Surface::Sandstone || surface == Surface::Sand) dust = { 196, 168, 124, 255 };
+    else if (surface == Surface::Stone) dust = { 170, 164, 150, 255 };
+    else if (earth) dust = { 120, 100, 76, 255 };
     int puffs = steel ? 4 : 8;
     for (int i = 0; i < puffs; i++) {
         Vector3 d = RandAround(normal, 0.6f);
@@ -320,12 +324,12 @@ void SetWorld(const World* world) { level = world; }
 static float FloorAt(Vector3 p) {
     float floor = 0.0f;
     if (!level) return floor;
-    for (const WorldBox& box : *level) {
-        BoundingBox bb = box.Bounds();
+    level->ForEachNear(p.x, p.x, p.z, p.z, [&](int i) {
+        BoundingBox bb = (*level)[i].Bounds();
         if (bb.max.y <= p.y + 0.02f && bb.max.y > floor && p.x > bb.min.x && p.x < bb.max.x && p.z > bb.min.z &&
             p.z < bb.max.z)
             floor = bb.max.y;
-    }
+    });
     return floor;
 }
 

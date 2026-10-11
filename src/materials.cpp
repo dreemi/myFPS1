@@ -71,7 +71,17 @@ WorldMaterials LoadWorldMaterials(const std::string& assetDir) {
     generated(Surface::Crate, "crate", 1.0f, 0.2f, true);
     generated(Surface::Sand, "sand", 4.0f, 0.1f, false);
     generated(Surface::Painted, "planks", 1.2f, 0.3f, false, { 150, 205, 215, 255 }); // faded teal shutters and doors
-    m.loaded = true;
+    generated(Surface::Stone, "stone", 2.5f, 0.15f, false);
+    generated(Surface::Logs, "logs", 2.0f, 0.15f, false);
+    generated(Surface::Shingles, "shingles", 2.0f, 0.15f, false);
+    generated(Surface::Bark, "bark", 2.0f, 0.1f, false);
+    generated(Surface::Dirt, "dirt", 3.0f, 0.05f, false);
+    m.terrain.grass = LoadSurfaceTexture(dir + "grass_color.png", "");
+    m.terrain.dirt = m.surfaces[(int)Surface::Dirt].albedo;   // shared with the Dirt surface
+    m.terrain.field = LoadSurfaceTexture(dir + "field_color.png", "");
+    m.terrain.forest = LoadSurfaceTexture(dir + "forestfloor_color.png", "");
+    m.leaves = LoadSurfaceTexture(dir + "leaves_color.png", "");
+    m.loaded = m.terrain.grass.id && m.terrain.field.id && m.terrain.forest.id && m.leaves.id;
     for (int s = 1; s < (int)Surface::Count; s++) {
         const SurfaceLook& l = m.surfaces[s];
         if (!l.albedo.id || !l.normal.id || !l.rough.id) m.loaded = false;
@@ -84,6 +94,8 @@ void UnloadWorldMaterials(WorldMaterials& m) {
     for (SurfaceLook& l : m.surfaces)
         for (Texture2D t : { l.albedo, l.normal, l.rough })
             if (t.id) UnloadTexture(t);
+    for (Texture2D t : { m.terrain.grass, m.terrain.field, m.terrain.forest, m.leaves }) // dirt is the Dirt surface's
+        if (t.id) UnloadTexture(t);
     m = WorldMaterials{};
 }
 

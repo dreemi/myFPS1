@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include "raylib.h"
@@ -37,7 +38,11 @@ static void LoadSettings(Hud::MenuFields& f) {
         if (key == "name") f.name = value;
         else if (key == "address") f.address = value;
         else if (key == "port") f.port = value;
-        else if (key == "bots") f.bots = std::clamp(atoi(value.c_str()), 0, 4);
+        else if (key == "bots") f.bots = std::clamp(atoi(value.c_str()), 0, 6);
+        else if (key == "map") {
+            for (int m = 0; m < (int)MapId::Count; m++)
+                if (value == MapName((MapId)m)) f.map = m;
+        }
     }
 }
 
@@ -47,7 +52,8 @@ static void SaveSettings(const Hud::MenuFields& f) {
         for (char& c : s) if (c == ' ') c = '_';
         return s.empty() ? std::string("-") : s;
     };
-    out << "name " << safe(f.name) << "\naddress " << safe(f.address) << "\nport " << safe(f.port) << "\nbots " << f.bots << "\n";
+    out << "name " << safe(f.name) << "\naddress " << safe(f.address) << "\nport " << safe(f.port) << "\nbots " << f.bots
+        << "\nmap " << MapName((MapId)f.map) << "\n";
 }
 
 // Presentation state that belongs to one session (reset when a new one starts)
@@ -70,8 +76,9 @@ struct Feel {
 
 int main(int argc, char** argv) {
     // Command line: --overview N (debug render), --host [port], --join address[:port],
-    // --offline, --name NAME, --bots N
+    // --offline, --name NAME, --bots N, --map redoubt|dustyard
     int overview = -1;
+    bool bench = false;   // with --overview: time 300 frames without vsync instead of a screenshot
     Hud::MenuFields fields;
     LoadSettings(fields);
     int autoStart = -1; // a SessionMode to start straight away
@@ -79,6 +86,7 @@ int main(int argc, char** argv) {
         std::string a = argv[i];
         bool hasNext = i + 1 < argc && argv[i + 1][0] != '-';
         if (a == "--overview" && hasNext) overview = atoi(argv[++i]);
+        else if (a == "--bench") bench = true;
         else if (a == "--host") { autoStart = (int)SessionMode::Host; if (hasNext) fields.port = argv[++i]; }
         else if (a == "--offline") autoStart = (int)SessionMode::Offline;
         else if (a == "--join" && hasNext) {
@@ -88,12 +96,18 @@ int main(int argc, char** argv) {
             if (colon != std::string::npos) { fields.port = addr.substr(colon + 1); addr = addr.substr(0, colon); }
             fields.address = addr;
         } else if (a == "--name" && hasNext) fields.name = argv[++i];
-        else if (a == "--bots" && hasNext) fields.bots = std::clamp(atoi(argv[++i]), 0, 4);
+        else if (a == "--bots" && hasNext) fields.bots = std::clamp(atoi(argv[++i]), 0, 6);
+        else if (a == "--map" && hasNext) {
+            std::string name = argv[++i];
+            for (char& c : name) c = (char)toupper(c);
+            for (int m = 0; m < (int)MapId::Count; m++)
+                if (name == MapName((MapId)m)) fields.map = m;
+        }
     }
 
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+    SetConfigFlags(bench ? FLAG_MSAA_4X_HINT : (FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT));
     InitWindow(SCREEN_W, SCREEN_H, "Dustyard");
-    SetTargetFPS(60);
+    SetTargetFPS(bench ? 0 : 60);
     InitAudioDevice();
 
     // Textures and models live in assets/ next to the executable
@@ -105,20 +119,29 @@ int main(int argc, char** argv) {
     CharacterAssets character; // everyone's body, your own legs, and your first-person arms
     LoadCharacter(character, assetDir);
 
-    World world = BuildTestWorld();
+    // The map: the one chosen in the menu (shown behind it), or the session's
+    World menuWorld = BuildMap((MapId)fields.map);
     Model ground = LoadGroundModel(ARENA_WIDTH, ARENA_LENGTH, materials); // only used if lighting is unavailable
 
     // Lighting: one lit shader for the level, characters and guns
     Render::Init(assetDir);
     Fx::Init();
-    Fx::SetWorld(&world); // dropped brass and magazines land on whatever they hit
     Hud::Init();
-    Render::BuildLevel(world, materials);
     Render::ApplyLitShader(character.model);
     SetWeaponModelShader(Render::LitShader());
     InitHelmet(&character);
     float sunOnGun = 1.0f; // eases between 0 (player in shade) and 1
-    std::vector<SpawnPoint> spawns = GetSpawnPoints();
+    // Which world the renderer has built (rebuilt when the map changes)
+    const World* builtWorld = nullptr;
+    int worldSerial = 0, builtSerial = -1;   // bumped whenever a world object may have new contents
+    auto useWorld = [&](const World* w) {
+        if (w == builtWorld && builtSerial == worldSerial) return;
+        Render::BuildLevel(*w, materials);
+        Fx::SetWorld(w); // dropped brass and magazines land on whatever they hit
+        Fx::Clear();
+        builtWorld = w;
+        builtSerial = worldSerial;
+    };
 
     std::unique_ptr<Session> session;
     std::unique_ptr<RifleView> rifleView;
@@ -141,8 +164,11 @@ int main(int argc, char** argv) {
         cfg.port = (uint16_t)(port > 0 && port < 65536 ? port : 27015);
         fields.port = std::to_string(cfg.port);
         cfg.bots = fields.bots;
+        cfg.map = (MapId)fields.map;
         SaveSettings(fields);
-        session = std::make_unique<Session>(mode, world, cfg);
+        session.reset();
+        worldSerial++;
+        session = std::make_unique<Session>(mode, cfg);
         rifleView = std::make_unique<RifleView>(FAL_MODELS);
         revolverView = std::make_unique<ViewModel>(REVOLVER_MODELS);
         rifleView->arms = revolverView->arms = &character;
@@ -160,6 +186,7 @@ int main(int argc, char** argv) {
     auto endSession = [&](const std::string& message, bool error) {
         if (session) session->Leave();
         session.reset();
+        worldSerial++;
         audio.StopReload();
         audio.StopFootstepsFrom(0);
         menuStatus = { message, false, error };
@@ -183,6 +210,9 @@ int main(int argc, char** argv) {
                                                   session->Mode() == SessionMode::Client);
         }
         bool playing = session && session->State() == SessionState::Playing && session->Local();
+        const World* worldPtr = session && session->GetWorld() ? session->GetWorld() : &menuWorld;
+        useWorld(worldPtr);
+        const World& world = *worldPtr;
         if (playing && !inGame) { DisableCursor(); inGame = true; inputGrace = 2; }
         if (!playing && inGame) { EnableCursor(); inGame = false; }
 
@@ -493,15 +523,41 @@ int main(int argc, char** argv) {
             }
             cam.target = Vector3Add(cam.position, f);
         } else {
-            // The menu: a slow flight around the town
-            float a = (float)GetTime() * 0.05f;
-            cam.position = { sinf(a) * 34.0f, 16.0f, cosf(a) * 34.0f };
-            cam.target = { 0, 1.5f, 0 };
+            // The menu: a slow flight around the map
+            float a = (float)GetTime() * (world.length > 120.0f ? 0.03f : 0.05f);
+            if (world.length > 120.0f) {
+                cam.position = { sinf(a) * 58.0f, 34.0f, cosf(a) * 112.0f };
+                cam.target = { 0, 3.0f, 0 };
+            } else {
+                cam.position = { sinf(a) * 34.0f, 16.0f, cosf(a) * 34.0f };
+                cam.target = { 0, 1.5f, 0 };
+            }
             cam.up = { 0, 1, 0 };
             cam.fovy = 60.0f;
             cam.projection = CAMERA_PERSPECTIVE;
         }
-        if (overview >= 0) {
+        if (overview >= 0 && world.map == MapId::Redoubt) {
+            static const Vector3 VIEWS[][2] = {
+                { { 0.0f, 150.0f, 0.0f }, { 0, 0, 0 } },              // straight down (A on the left)
+                { { -27.5f, 16.7f, -83.0f }, { -6, 12, 0 } },        // A's lookout, toward the middle
+                { { 26.0f, 26.0f, -30.0f }, { 0, 0, 0 } },           // the fort from above
+                { { -5.5f, 1.7f, -80.0f }, { -2, 1.8f, -62 } },      // A's forest road, eye height
+                { { 24.0f, 1.7f, -68.0f }, { 24, 1.5f, 0 } },        // down A's farmland flank
+                { { -2.0f, 3.0f, -45.0f }, { 10, 3, -30 } },         // A's house from the forest
+                { { -1.5f, 1.7f, -15.0f }, { 0, 1.8f, 0 } },         // into the fort through A's gate
+                { { 0.0f, 1.7f, -114.0f }, { 0, 1.7f, -95 } },       // A's spawn, looking out
+                { { -28.5f, 16.7f, -82.5f }, { -28.8f, 0, -10 } },   // A's lookout, down its lane
+                { { 24.0f, 1.7f, 21.0f }, { 0, 1.5f, 0 } },          // the fort from A's flank hut
+                { { -12.0f, 1.7f, -60.0f }, { -6, 4.0f, -45 } },     // in the forest, under the canopy
+                { { 0.0f, 60.0f, -150.0f }, { 0, 0, -60 } },         // over A's end of the map
+            };
+            int v = overview % (int)(sizeof(VIEWS) / sizeof(VIEWS[0]));
+            cam.position = VIEWS[v][0];
+            cam.target = VIEWS[v][1];
+            cam.up = v == 0 ? Vector3{ 1, 0, 0 } : Vector3{ 0, 1, 0 };
+            cam.fovy = v == 0 ? 50.0f : 70.0f;
+            cam.projection = CAMERA_PERSPECTIVE;
+        } else if (overview >= 0) {
             static const Vector3 VIEWS[][2] = {
                 { { 0.0f, 95.0f, -0.01f }, { 0, 0, 0 } },          // straight down
                 { { -26.0f, 26.0f, -52.0f }, { 0, 0, -12 } },      // over team A's spawn
@@ -563,7 +619,7 @@ int main(int argc, char** argv) {
         }
 
         // 1. Shadows from the sun
-        Render::BeginShadowPass();
+        Render::BeginShadowPass(cam.position);
             Render::DrawLevel();
             drawSoldiers();
             drawPlayerBody(PART_ALL & ~PART_HEAD);
@@ -579,11 +635,12 @@ int main(int argc, char** argv) {
                 Render::DrawLevel();
             } else {
                 DrawModel(ground, { 0, 0, 0 }, 1.0f, WHITE);
-                for (const WorldBox& b : world) DrawWorldBox(b, materials);
+                for (const WorldBox& b : world)
+                    if (!b.Hidden()) DrawWorldBox(b, materials);
             }
             drawSoldiers();
             drawPlayerBody(PART_LEGS);
-            for (const SpawnPoint& s : spawns)
+            for (const SpawnPoint& s : world.spawns)
                 Fx::DrawGroundMarker(s.position, 1.3f, s.yaw, { s.color.r, s.color.g, s.color.b, 170 });
             Fx::DrawCasings(DrawDebris);
             Render::SurfaceObject(0.25f);
@@ -684,6 +741,11 @@ int main(int argc, char** argv) {
                     case Hud::MenuAction::Join: startSession(SessionMode::Client); break;
                     case Hud::MenuAction::Cancel: endSession("Cancelled", false); break;
                     case Hud::MenuAction::Quit: quit = true; break;
+                    case Hud::MenuAction::MapChanged:
+                        menuWorld = BuildMap((MapId)fields.map);
+                        worldSerial++;
+                        SaveSettings(fields);
+                        break;
                     default: break;
                 }
                 if (showFps) DrawText(TextFormat("%d FPS", GetFPS()), 24, 18, 18, { 120, 230, 120, 255 });
@@ -692,9 +754,28 @@ int main(int argc, char** argv) {
 
         EndDrawing();
         static int frames = 0;
-        if (overview >= 0 && ++frames == 30) {
+        if (overview >= 0 && !bench && ++frames == 30) {
             TakeScreenshot(TextFormat("overview_%d.png", overview));
             quit = true;
+        }
+        static double benchStart = 0.0;
+        static float benchWorst = 0.0f;
+        if (bench) {
+            // Timing: 300 frames after a 60-frame warm-up, the average and the worst
+            ++frames;
+            if (frames == 60) benchStart = GetTime();
+            static int benchSlow = 0;
+            if (frames > 60) {
+                benchWorst = std::max(benchWorst, GetFrameTime());
+                if (GetFrameTime() > 0.012f) benchSlow++;
+            }
+            if (frames == 360) {
+                std::printf("BENCH %s: %.2f ms per frame, worst %.2f ms, %d frames over 12 ms\n",
+                            overview >= 0 ? TextFormat("view %d", overview) : "game", (GetTime() - benchStart) * 1000.0 / 300.0,
+                            benchWorst * 1000.0f, benchSlow);
+                std::fflush(stdout);
+                quit = true;
+            }
         }
     }
 

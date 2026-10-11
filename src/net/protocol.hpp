@@ -13,7 +13,7 @@
 // presentation-only values are quantized.
 namespace Proto {
 
-constexpr uint16_t VERSION = 2;
+constexpr uint16_t VERSION = 3;
 
 enum MsgType : uint8_t {
     MSG_HELLO = 1,    // client -> host: version, name
@@ -87,7 +87,7 @@ struct Snapshot {
 };
 
 struct Hello { uint16_t version = VERSION; std::string name; };
-struct Welcome { uint8_t id = NO_ID; float time = 0.0f; };
+struct Welcome { uint8_t id = NO_ID; float time = 0.0f; uint8_t map = 0; };
 struct RosterEntry { uint8_t id; std::string name; };
 
 std::vector<uint8_t> EncodeHello(const Hello& h);

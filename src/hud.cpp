@@ -1,4 +1,5 @@
 #include "hud.hpp"
+#include "world.hpp"
 #include "raymath.h"
 #include <cmath>
 
@@ -372,11 +373,11 @@ static bool Field(Rectangle r, std::string& value, int id, int& focus, size_t ma
 MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& st) {
     DrawRectangleGradientV(0, 0, screenW, screenH, { 6, 8, 12, 140 }, { 6, 8, 12, 235 });
     float cx = screenW / 2.0f;
-    Text("DUSTYARD", cx, 54, 88, TEXT, CENTER);
-    DrawRectangle((int)cx - 150, 148, 300, 3, ACCENT);
+    Text("DUSTYARD", cx, 40, 80, TEXT, CENTER);
+    DrawRectangle((int)cx - 150, 126, 300, 3, ACCENT);
 
     MenuAction action = MenuAction::None;
-    Rectangle panel = { cx - 330, 176, 660, 430 };
+    Rectangle panel = { cx - 330, 146, 660, 486 };
     DrawRectangleRounded(panel, 0.04f, 8, { 10, 12, 14, 190 });
     float lx = panel.x + 150;   // fields start here (labels to their left)
 
@@ -384,34 +385,45 @@ MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& s
     Field({ lx, panel.y + 24, 260, 38 }, f.name, 0, f.focus, 16, false, "NAME");
 
     if (st.busy) {
-        Text(st.text.c_str(), cx, panel.y + 150, 24, ACCENT, CENTER, 0.6f + 0.4f * sinf((float)GetTime() * 5.0f));
-        if (Button({ cx - 110, panel.y + 220, 220, 48 }, "CANCEL")) action = MenuAction::Cancel;
+        Text(st.text.c_str(), cx, panel.y + 180, 24, ACCENT, CENTER, 0.6f + 0.4f * sinf((float)GetTime() * 5.0f));
+        if (Button({ cx - 110, panel.y + 250, 220, 48 }, "CANCEL")) action = MenuAction::Cancel;
         return action;
     }
 
+    // The map (for hosting and offline; joining plays the host's)
+    static const char* BLURBS[] = { "Woods, farmland flanks and a stone fort in the middle. Big: 240 m.",
+                                    "A sun-baked town: three lanes and a plaza. Small and quick." };
+    const int maps = (int)MapId::Count;
+    Text("MAP", lx - 14, panel.y + 87, 18, DIM, RIGHT);
+    if (Button({ lx, panel.y + 78, 38, 38 }, "<")) { f.map = (f.map + maps - 1) % maps; action = MenuAction::MapChanged; }
+    Text(MapName((MapId)f.map), lx + 111, panel.y + 85, 24, TEXT, CENTER);
+    if (Button({ lx + 184, panel.y + 78, 38, 38 }, ">")) { f.map = (f.map + 1) % maps; action = MenuAction::MapChanged; }
+    Text(BLURBS[f.map % 2], lx, panel.y + 119, 14, DIM);
+
     // Play alone
     if (Button({ panel.x + 430, panel.y + 20, 200, 46 }, "PLAY OFFLINE")) action = MenuAction::Offline;
-    DrawRectangle((int)panel.x + 24, (int)panel.y + 86, (int)panel.width - 48, 1, { 255, 255, 255, 30 });
+    const float o = 52.0f;
+    DrawRectangle((int)panel.x + 24, (int)(panel.y + 86 + o), (int)panel.width - 48, 1, { 255, 255, 255, 30 });
 
     // Host: friends join you
-    Text("HOST A GAME", panel.x + 24, panel.y + 104, 18, ACCENT);
-    Field({ lx, panel.y + 136, 90, 38 }, f.port, 1, f.focus, 5, true, "PORT");
-    Text("BOTS", lx + 150, panel.y + 145, 18, DIM, RIGHT);
-    if (Button({ lx + 160, panel.y + 136, 38, 38 }, "-") && f.bots > 0) f.bots--;
-    Text(TextFormat("%d", f.bots), lx + 216, panel.y + 143, 22, TEXT, CENTER);
-    if (Button({ lx + 234, panel.y + 136, 38, 38 }, "+") && f.bots < 4) f.bots++;
-    if (Button({ panel.x + 430, panel.y + 132, 200, 46 }, "HOST GAME", true, true)) action = MenuAction::Host;
-    DrawRectangle((int)panel.x + 24, (int)panel.y + 198, (int)panel.width - 48, 1, { 255, 255, 255, 30 });
+    Text("HOST A GAME", panel.x + 24, panel.y + 104 + o, 18, ACCENT);
+    Field({ lx, panel.y + 136 + o, 90, 38 }, f.port, 1, f.focus, 5, true, "PORT");
+    Text("BOTS", lx + 150, panel.y + 145 + o, 18, DIM, RIGHT);
+    if (Button({ lx + 160, panel.y + 136 + o, 38, 38 }, "-") && f.bots > 0) f.bots--;
+    Text(TextFormat("%d", f.bots), lx + 216, panel.y + 143 + o, 22, TEXT, CENTER);
+    if (Button({ lx + 234, panel.y + 136 + o, 38, 38 }, "+") && f.bots < 6) f.bots++;
+    if (Button({ panel.x + 430, panel.y + 132 + o, 200, 46 }, "HOST GAME", true, true)) action = MenuAction::Host;
+    DrawRectangle((int)panel.x + 24, (int)(panel.y + 198 + o), (int)panel.width - 48, 1, { 255, 255, 255, 30 });
 
     // Join: someone else's game
-    Text("JOIN A GAME", panel.x + 24, panel.y + 216, 18, ACCENT);
-    bool enter = Field({ lx, panel.y + 248, 260, 38 }, f.address, 2, f.focus, 60, false, "ADDRESS");
-    if (Button({ panel.x + 430, panel.y + 244, 200, 46 }, "JOIN GAME", true, true) || enter) action = MenuAction::Join;
-    Text("Their IP address (or name), and the PORT above", lx, panel.y + 294, 15, DIM);
-    DrawRectangle((int)panel.x + 24, (int)panel.y + 326, (int)panel.width - 48, 1, { 255, 255, 255, 30 });
+    Text("JOIN A GAME", panel.x + 24, panel.y + 216 + o, 18, ACCENT);
+    bool enter = Field({ lx, panel.y + 248 + o, 260, 38 }, f.address, 2, f.focus, 60, false, "ADDRESS");
+    if (Button({ panel.x + 430, panel.y + 244 + o, 200, 46 }, "JOIN GAME", true, true) || enter) action = MenuAction::Join;
+    Text("Their IP address (or name), and the PORT above", lx, panel.y + 294 + o, 15, DIM);
+    DrawRectangle((int)panel.x + 24, (int)(panel.y + 326 + o), (int)panel.width - 48, 1, { 255, 255, 255, 30 });
 
-    if (!st.text.empty()) Text(st.text.c_str(), cx, panel.y + 340, 18, st.error ? DANGER : TEXT, CENTER);
-    if (Button({ cx - 100, panel.y + 370, 200, 44 }, "QUIT")) action = MenuAction::Quit;
+    if (!st.text.empty()) Text(st.text.c_str(), cx, panel.y + 340 + o, 18, st.error ? DANGER : TEXT, CENTER);
+    if (Button({ cx - 100, panel.y + 370 + o, 200, 44 }, "QUIT")) action = MenuAction::Quit;
 
     Text("Hosting over the internet: forward UDP port (default 27015) on your router to this PC and allow the game "
          "through the firewall.", cx, screenH - 64.0f, 15, DIM, CENTER);

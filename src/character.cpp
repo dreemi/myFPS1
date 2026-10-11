@@ -1,4 +1,5 @@
 #include "character.hpp"
+#include "render.hpp"
 #include "raymath.h"
 #include <cstdio>
 #include <cstring>
@@ -90,7 +91,11 @@ int CharacterFrameAt(const CharacterAssets& c, CharAnim anim, float fraction) {
 void DrawCharacter(CharacterAssets& c, CharAnim anim, int frame, Matrix transform, int parts, Color tint) {
     if (!c.loaded) return;
     int ai = c.animIndex[(int)anim];
-    UpdateModelAnimation(c.model, c.anims[ai], frame);
+    // Posed on the GPU when the lit shader can (the mesh keeps its bind pose); otherwise
+    // raylib poses every vertex on the CPU
+    bool gpu = Render::BeginSkinned();
+    if (gpu) UpdateModelAnimationBones(c.model, c.anims[ai], frame);
+    else UpdateModelAnimation(c.model, c.anims[ai], frame);
     Matrix m = MatrixMultiply(c.model.transform, transform);
     for (int i = 0; i < c.model.meshCount; i++) {
         if (!(parts & c.meshPart[i])) continue;
@@ -100,6 +105,7 @@ void DrawCharacter(CharacterAssets& c, CharAnim anim, int frame, Matrix transfor
         DrawMesh(c.model.meshes[i], mat, m);
         mat.maps[MATERIAL_MAP_DIFFUSE].color = old;
     }
+    if (gpu) Render::EndSkinned();
 }
 
 Matrix CharacterHandTransform(const CharacterAssets& c, CharAnim anim, int frame) {

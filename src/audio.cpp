@@ -395,7 +395,9 @@ void GameAudio::PlayAt(Sfx s, Vector3 source, Vector3 ear, Vector3 right, float 
 void GameAudio::PlayImpact(Surface surface, Vector3 at, Vector3 ear, Vector3 right) {
     Sfx s = Sfx::ImpactConcrete;
     if (surface == Surface::Steel) s = Sfx::ImpactSteel;
-    else if (surface == Surface::Wood || surface == Surface::Crate || surface == Surface::Painted) s = Sfx::ImpactWood;
+    else if (surface == Surface::Wood || surface == Surface::Crate || surface == Surface::Painted || surface == Surface::Logs ||
+             surface == Surface::Shingles || surface == Surface::Bark)
+        s = Sfx::ImpactWood;
     PlayAt(s, at, ear, right, 0.9f);
 }
 

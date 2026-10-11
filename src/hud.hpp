@@ -71,9 +71,10 @@ struct MenuFields {
     std::string address = "127.0.0.1";
     std::string port = "27015";
     int bots = 1;
+    int map = 0;                  // MapId, for hosting and playing offline
     int focus = -1;               // which text field has the keyboard
 };
-enum class MenuAction { None, Offline, Host, Join, Cancel, Quit };
+enum class MenuAction { None, Offline, Host, Join, Cancel, Quit, MapChanged };
 struct MenuStatus {
     std::string text;             // what's happening (or what went wrong)
     bool busy = false;            // connecting: offer Cancel instead of the buttons

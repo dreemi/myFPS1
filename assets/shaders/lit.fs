@@ -13,6 +13,8 @@ in vec4 fragLightPos;
 uniform sampler2D texture0;   // albedo (sRGB)
 uniform sampler2D texture1;   // roughness (world surfaces)
 uniform sampler2D texture2;   // normal map, OpenGL convention (world surfaces)
+uniform sampler2D texture3;   // terrain: forest floor
+uniform sampler2D texture4;   // terrain: the ground mask (r road, g field, b forest, a variation)
 uniform sampler2D shadowMap;
 uniform vec4 colDiffuse;
 
@@ -22,7 +24,14 @@ uniform float tileSize;
 uniform float specular;       // highlight strength for this surface
 
 // Physically based objects (materialMode = 1): metal/roughness, optional maps
-uniform int materialMode;     // 0 = simple (characters), 1 = PBR (weapons, casings)
+uniform int materialMode;     // 0 = simple (characters), 1 = PBR (weapons, casings), 2 = terrain
+uniform float alphaCut;       // > 0: pixels less opaque than this are cut out (leaves)
+
+// Terrain (materialMode = 2): texture0 grass, texture1 dirt, texture2 plowed field,
+// texture3 forest floor, all tiled in world space; texture4 says which goes where
+uniform vec2 maskOrigin;      // world (x, z) of the mask's corner
+uniform vec2 maskSize;        // metres the mask covers
+uniform vec4 terrainTiles;    // metres per repeat: grass, dirt, field, forest
 uniform float metallic;
 uniform float roughness;      // multiplies the roughness map when there is one
 uniform int useRoughMap;      // texture1.r
@@ -131,7 +140,28 @@ void main()
     }
 
     vec4 tex = texture(texture0, uv);
+    if (alphaCut > 0.0 && tex.a < alphaCut) discard;
     vec3 albedo = ToLinear(tex.rgb * colDiffuse.rgb * fragColor.rgb);
+
+    if (materialMode == 2) {
+        // Each texture sampled twice at different scales and angles so the repeats don't show
+        vec2 w = fragPosition.xz;
+        mat2 turn = mat2(0.8, -0.6, 0.6, 0.8);
+        vec4 m = texture(texture4, (w - maskOrigin) / maskSize);
+        vec3 grass = mix(texture(texture0, w / terrainTiles.x).rgb, texture(texture0, turn * w / (terrainTiles.x * 3.1)).rgb, 0.4);
+        vec3 dirt = mix(texture(texture1, w / terrainTiles.y).rgb, texture(texture1, turn * w / (terrainTiles.y * 2.7)).rgb, 0.35);
+        vec3 field = texture(texture2, w / terrainTiles.z).rgb;
+        vec3 forest = mix(texture(texture3, w / terrainTiles.w).rgb, texture(texture3, turn * w / (terrainTiles.w * 2.9)).rgb, 0.35);
+        // Blend edges follow the textures' own light and dark (dirt shows first in grass's gaps)
+        float gl = dot(grass, vec3(0.33));
+        vec3 c = mix(grass, forest, smoothstep(0.15, 0.85, m.b + (0.5 - gl) * 0.3));
+        c = mix(c, field, smoothstep(0.1, 0.9, m.g));
+        c = mix(c, dirt, smoothstep(0.1, 0.8, m.r + (0.5 - gl) * 0.4));
+        c *= mix(0.8, 1.16, m.a);
+        albedo = ToLinear(c * colDiffuse.rgb);
+        tex.a = 1.0;
+        rough = 0.95;
+    }
 
     if (materialMode == 1) {
         if (useNormalMap == 1) {
@@ -200,5 +230,5 @@ void main()
     float fog = 1.0 - exp(-length(viewPos - fragPosition) * fogDensity);
     color = mix(color, ToLinear(fogColor), fog);
 
-    finalColor = vec4(Tonemap(color), tex.a * colDiffuse.a * fragColor.a);
+    finalColor = vec4(Tonemap(color), alphaCut > 0.0 ? 1.0 : tex.a * colDiffuse.a * fragColor.a);
 }

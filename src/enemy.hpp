@@ -165,7 +165,8 @@ private:
 
     float wanderSpeed = 2.5f;
     float runSpeed = 4.5f;
-    float sightRange = 30.0f;
+    float sightRange = 30.0f;    // at least; a big map can see further (World::botSight)
+    float hotspotBias = 0.6f;    // how often a wander goes somewhere fights happen
     float alertMemory = 2.0f;    // still "alerted" this long after losing sight
     float planRadius = 10.0f;    // looks for firing positions within this distance of itself
     float moveTimeout = 4.0f;    // gives up on reaching a position after this long
