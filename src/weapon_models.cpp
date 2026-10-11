@@ -38,32 +38,35 @@ static void DrawLimb(Vector3 start, Vector3 dir, float length, float thickness, 
 // fal.txt, written by tools/make_revolver.py and tools/make_fal.py)
 // ---------------------------------------------------------------------------
 
-// How each material looks. Textures are neutral; the tint gives the colour.
+// How each material looks. Every gun shares one set of textures (assets/models/gun_textures,
+// made by tools/make_gun_textures.py): neutral blued steel, which the tint colours, and
+// walnut; the revolver's grip has the same walnut cut as one checkered panel.
+enum TextureSet { TEX_METAL, TEX_GRIP, TEX_WOOD };
 struct MaterialLook {
     const char* name;
     Color tint;
     float metallic, roughness;
     bool roughMap;
-    int albedo;       // 0 = steel texture, 1 = revolver walnut, 2 = FAL wood
-    bool normalMap;   // revolver walnut only
+    int textures;     // TextureSet
+    bool normalMap;   // the set's normal map (machining marks, scratches, grain, checkering)
     float occlusion;
 };
 static const MaterialLook LOOKS[] = {
-    { "steel",      { 140, 143, 152, 255 }, 1.0f, 0.80f, true,  0, false, 1.0f },  // deep blued steel: dark, but a strong mirror
-    { "bright",     { 215, 215, 220, 255 }, 1.0f, 0.80f, true,  0, false, 1.0f },  // polished: extractor, screws, bolt
-    { "hardened",   { 128, 122, 116, 255 }, 1.0f, 0.85f, true,  0, false, 1.0f },  // case-hardened hammer and trigger
-    { "wood",       { 255, 255, 255, 255 }, 0.0f, 1.00f, true,  1, true,  1.0f },  // oiled walnut, checkered
-    { "gold",       { 235, 190, 105, 255 }, 1.0f, 0.70f, true,  0, false, 1.0f },  // grip medallions
-    { "brass",      { 232, 182, 102, 255 }, 1.0f, 1.10f, true,  0, false, 1.0f },
-    { "primer",     { 205, 200, 195, 255 }, 1.0f, 0.90f, true,  0, false, 1.0f },
-    { "lead",       { 128, 128, 134, 255 }, 0.5f, 0.65f, false, 0, false, 1.0f },
-    { "bore",       {  24,  24,  24, 255 }, 0.0f, 0.90f, false, 0, false, 0.15f }, // inside barrels and chambers
-    { "red",        { 230,  45,  30, 255 }, 0.0f, 0.35f, false, 0, false, 1.0f },  // front sight insert
-    { "black",      {  45,  45,  48, 255 }, 0.0f, 1.40f, true,  0, false, 1.0f },  // anodized speedloader
-    { "parkerized", {  92,  92,  96, 255 }, 1.0f, 1.85f, true,  0, false, 1.0f },  // the FAL's dull phosphate finish
-    { "falwood",    { 255, 255, 255, 255 }, 0.0f, 1.00f, true,  2, false, 1.0f },  // the FAL's furniture
-    { "copper",     { 222, 140, 100, 255 }, 1.0f, 1.00f, true,  0, false, 1.0f },  // bullet jackets
-    { "glass",      {  60,  80, 105, 255 }, 1.0f, 0.12f, false, 0, false, 1.0f },  // telescope lenses: a dark, blue-tinted mirror
+    { "steel",      { 140, 143, 152, 255 }, 1.0f, 0.80f, true,  TEX_METAL, true,  1.0f },  // deep blued steel: dark, but a strong mirror
+    { "bright",     { 215, 215, 220, 255 }, 1.0f, 0.80f, true,  TEX_METAL, true,  1.0f },  // polished: extractor, screws, bolt
+    { "hardened",   { 128, 122, 116, 255 }, 1.0f, 0.85f, true,  TEX_METAL, true,  1.0f },  // case-hardened hammer and trigger
+    { "wood",       { 255, 255, 255, 255 }, 0.0f, 1.00f, true,  TEX_GRIP,  true,  1.0f },  // the revolver's checkered walnut grip
+    { "gold",       { 235, 190, 105, 255 }, 1.0f, 0.70f, true,  TEX_METAL, true,  1.0f },  // grip medallions
+    { "brass",      { 232, 182, 102, 255 }, 1.0f, 1.10f, true,  TEX_METAL, true,  1.0f },
+    { "primer",     { 205, 200, 195, 255 }, 1.0f, 0.90f, true,  TEX_METAL, false, 1.0f },
+    { "lead",       { 128, 128, 134, 255 }, 0.5f, 0.65f, false, TEX_METAL, false, 1.0f },
+    { "bore",       {  24,  24,  24, 255 }, 0.0f, 0.90f, false, TEX_METAL, false, 0.15f }, // inside barrels and chambers
+    { "red",        { 230,  45,  30, 255 }, 0.0f, 0.35f, false, TEX_METAL, false, 1.0f },  // front sight insert
+    { "black",      {  45,  45,  48, 255 }, 0.0f, 1.40f, true,  TEX_METAL, true,  1.0f },  // anodized speedloader, the telescope
+    { "parkerized", {  92,  92,  96, 255 }, 1.0f, 1.85f, true,  TEX_METAL, true,  1.0f },  // the FAL's dull phosphate finish
+    { "falwood",    { 255, 255, 255, 255 }, 0.0f, 1.00f, true,  TEX_WOOD,  true,  1.0f },  // rifle furniture (FAL, L42A1)
+    { "copper",     { 222, 140, 100, 255 }, 1.0f, 1.00f, true,  TEX_METAL, true,  1.0f },  // bullet jackets
+    { "glass",      {  60,  80, 105, 255 }, 1.0f, 0.12f, false, TEX_METAL, false, 1.0f },  // telescope lenses: a dark, blue-tinted mirror
 };
 static const int LOOK_COUNT = sizeof(LOOKS) / sizeof(LOOKS[0]);
 
@@ -77,7 +80,8 @@ struct GunAsset {
 };
 
 static GunAsset revolver, fal, l42;
-static Texture2D steelAlbedo{}, steelRough{}, woodAlbedo{}, woodRough{}, woodNormal{}, falWoodAlbedo{}, falWoodRough{};
+// The shared textures, per TextureSet: albedo, roughness, normal
+static Texture2D setTex[3][3];
 static RevolverRig rig;
 static FalRig falRig;
 static SniperRig sniperRig;
@@ -120,17 +124,24 @@ static bool LoadGun(GunAsset& g, const std::string& glb, const std::string& txt,
     if (g.partMeshes[0].empty()) return false;
     g.model = LoadModel(glb.c_str());
     if (g.model.meshCount == 0) return false;
+    // Parts joined from pieces that already had a UV map carry two: the scripts' texture
+    // mapping (box_uvs) is the second. Use it, or the texture lands on one spot (flat colour).
+    for (int i = 0; i < g.model.meshCount; i++) {
+        Mesh& mesh = g.model.meshes[i];
+        if (!mesh.texcoords2 || !mesh.texcoords) continue;
+        memcpy(mesh.texcoords, mesh.texcoords2, sizeof(float) * 2 * mesh.vertexCount);
+        UpdateMeshBuffer(mesh, 1, mesh.texcoords, (int)(sizeof(float) * 2 * mesh.vertexCount), 0);
+    }
     // Every mesh using a material shares it, so set each material up once from its look
     for (int i = 0; i < g.model.meshCount && i < (int)g.meshLook.size(); i++) {
         const MaterialLook& look = LOOKS[g.meshLook[i]];
         Material& m = g.model.materials[g.model.meshMaterial[i]];
         for (int k = 0; k < 12; k++) m.maps[k].texture = Texture2D{};
-        Texture2D albedo = look.albedo == 1 ? woodAlbedo : (look.albedo == 2 ? falWoodAlbedo : steelAlbedo);
-        Texture2D rough = look.albedo == 1 ? woodRough : (look.albedo == 2 ? falWoodRough : steelRough);
-        m.maps[MATERIAL_MAP_ALBEDO].texture = albedo;
+        const Texture2D* t = setTex[look.textures];
+        m.maps[MATERIAL_MAP_ALBEDO].texture = t[0];
         m.maps[MATERIAL_MAP_ALBEDO].color = look.tint;
-        if (look.roughMap) m.maps[MATERIAL_MAP_METALNESS].texture = rough; // texture1
-        if (look.normalMap) m.maps[MATERIAL_MAP_NORMAL].texture = woodNormal; // texture2
+        if (look.roughMap) m.maps[MATERIAL_MAP_METALNESS].texture = t[1]; // texture1
+        if (look.normalMap) m.maps[MATERIAL_MAP_NORMAL].texture = t[2];   // texture2
     }
     g.loaded = true;
     return true;
@@ -152,13 +163,11 @@ enum FalPart { FP_RECEIVER, FP_BOLT, FP_CHARGER, FP_TRIGGER, FP_MAG, FP_ROUND, F
 bool LoadWeaponModelAssets(const char* assetDir) {
     std::string rdir = std::string(assetDir) + "models/revolver/";
     std::string fdir = std::string(assetDir) + "models/fal/";
-    steelAlbedo = LoadTex(rdir + "steel_albedo.png");
-    steelRough = LoadTex(rdir + "steel_rough.png");
-    woodAlbedo = LoadTex(rdir + "wood_albedo.png");
-    woodRough = LoadTex(rdir + "wood_rough.png");
-    woodNormal = LoadTex(rdir + "wood_normal.png");
-    falWoodAlbedo = LoadTex(fdir + "fal_wood_albedo.png");
-    falWoodRough = LoadTex(fdir + "fal_wood_rough.png");
+    std::string tdir = std::string(assetDir) + "models/gun_textures/";
+    const char* SETS[3] = { "metal", "grip", "wood" };
+    const char* MAPS[3] = { "albedo", "rough", "normal" };
+    for (int k = 0; k < 3; k++)
+        for (int m = 0; m < 3; m++) setTex[k][m] = LoadTex(tdir + SETS[k] + "_" + MAPS[m] + ".png");
 
     if (LoadGun(revolver, rdir + "revolver.glb", rdir + "revolver.txt",
                 { "frame", "grip", "cylinder", "crane", "ejector", "hammer", "trigger", "latch", "round", "case", "speedloader" })) {
@@ -251,8 +260,9 @@ void UnloadWeaponModelAssets() {
         UnloadModel(g->model);
         *g = GunAsset{};
     }
-    for (Texture2D* t : { &steelAlbedo, &steelRough, &woodAlbedo, &woodRough, &woodNormal, &falWoodAlbedo, &falWoodRough })
-        if (t->id) { UnloadTexture(*t); *t = Texture2D{}; }
+    for (auto& set : setTex)
+        for (Texture2D& t : set)
+            if (t.id) { UnloadTexture(t); t = Texture2D{}; }
 }
 
 static void DrawGunPart(const GunAsset& g, int part, Matrix transform) {

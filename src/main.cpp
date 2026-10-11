@@ -85,10 +85,11 @@ int main(int argc, char** argv) {
     Hud::MenuFields fields;
     LoadSettings(fields);
     int autoStart = -1; // a SessionMode to start straight away
-    // Debug: a scripted session (--demo-aim FROM TO, --demo-fire T, --demo-reload T) with
+    // Debug: a scripted session (--demo-aim FROM TO, --demo-fire T, --demo-reload T,
+    // --demo-switch T: to the other weapon) with
     // screenshots at the given seconds (--shots T1,T2,...: demo_<n>.png), then quit
     float demoAimFrom = -1.0f, demoAimTo = -1.0f;
-    std::vector<float> demoFire, demoReload, demoShots;
+    std::vector<float> demoFire, demoReload, demoSwitch, demoShots;
     auto times = [](const char* list) {
         std::vector<float> out;
         for (const char* p = list; *p;) {
@@ -106,6 +107,7 @@ int main(int argc, char** argv) {
         else if (a == "--demo-aim" && i + 2 < argc) { demoAimFrom = (float)atof(argv[++i]); demoAimTo = (float)atof(argv[++i]); }
         else if (a == "--demo-fire" && hasNext) demoFire = times(argv[++i]);
         else if (a == "--demo-reload" && hasNext) demoReload = times(argv[++i]);
+        else if (a == "--demo-switch" && hasNext) demoSwitch = times(argv[++i]);
         else if (a == "--shots" && hasNext) demoShots = times(argv[++i]);
         else if (a == "--host") { autoStart = (int)SessionMode::Host; if (hasNext) fields.port = argv[++i]; }
         else if (a == "--offline") autoStart = (int)SessionMode::Offline;
@@ -292,6 +294,7 @@ int main(int argc, char** argv) {
                 in.weapon.aim = demoClock >= demoAimFrom && demoClock < demoAimTo;
                 in.weapon.firePressed = in.weapon.fireHeld = demoAt(demoFire);
                 in.weapon.reload = demoAt(demoReload);
+                if (demoAt(demoSwitch)) in.switchTo = 2;
             }
             // Offline, pausing stops the world; in a shared game it carries on without you
             if (!(paused && session->Mode() == SessionMode::Offline)) session->Update(dt, in);
