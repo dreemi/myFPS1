@@ -439,9 +439,8 @@ int main(int argc, char** argv) {
                         case ViewSound::Close: audio.PlayReloadStep(ReloadStep::Close); break;
                         case ViewSound::MagOut: audio.Play(Sfx::MagOut, 0.8f); break;
                         case ViewSound::MagIn: audio.Play(Sfx::MagIn, 0.85f); break;
-                        case ViewSound::Slap: audio.Play(Sfx::MagSlap, 0.7f); break;
-                        case ViewSound::ChargeBack: audio.Play(Sfx::ChargeBack, 0.8f); break;
-                        case ViewSound::ChargeRelease: audio.Play(Sfx::ChargeRelease, 0.9f); break;
+                        // The FAL's slap and charging handle are covered by its recorded reload
+                        case ViewSound::Slap: case ViewSound::ChargeBack: case ViewSound::ChargeRelease: break;
                     }
                 }
                 for (const ViewModelEvents::Debris& d : vmEvents.debris) {

@@ -8,7 +8,7 @@
 enum class Sfx {
     ImpactConcrete, ImpactSteel, ImpactWood, FleshHit, HitTick, Headshot, KillConfirm,
     BulletCrack, Hurt, DryFire, Land, CasingTink,
-    RifleBoom, MagOut, MagIn, MagSlap, ChargeBack, ChargeRelease, MagDrop, WeaponDraw, Count
+    RifleBoom, MagOut, MagIn, MagDrop, WeaponDraw, Count
 };
 
 // The revolver's reload, step by step (cut from the reload recording so each

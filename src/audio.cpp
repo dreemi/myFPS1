@@ -147,43 +147,6 @@ Sound MakeSfx(Sfx kind) {
         x.NoiseBurst(0.25f, 5.0f, 0.12f, 0.0f, 0.05f); // the rumble rolling off the walls
         return x.Make(0.95f);
     }
-    case Sfx::MagOut: {         // the release clicks, the magazine scrapes out of the well
-        Synth x(0.25f);
-        x.NoiseBurst(0.6f, 130.0f, 0.9f, 0.85f);
-        x.Tone(2300.0f, 0.4f, 90.0f);
-        x.NoiseBurst(0.35f, 16.0f, 0.5f, 0.6f, 0.04f);
-        return x.Make(0.6f);
-    }
-    case Sfx::MagIn: {          // steel on steel, locking home
-        Synth x(0.2f);
-        x.Tone(320.0f, 0.5f, 40.0f);
-        x.Tone(1600.0f, 0.7f, 60.0f);
-        x.Tone(2850.0f, 0.4f, 80.0f);
-        x.NoiseBurst(0.8f, 90.0f, 0.85f, 0.8f);
-        return x.Make(0.7f);
-    }
-    case Sfx::MagSlap: {        // a palm smacking the floorplate
-        Synth x(0.15f);
-        x.NoiseBurst(0.9f, 45.0f, 0.2f);
-        x.Tone(180.0f, 0.6f, 35.0f);
-        return x.Make(0.55f);
-    }
-    case Sfx::ChargeBack: {     // the charging handle dragged back: a gritty slide and a stop
-        Synth x(0.3f);
-        x.NoiseBurst(0.5f, 7.0f, 0.6f, 0.7f);
-        x.Tone(900.0f, 0.3f, 30.0f);
-        x.NoiseBurst(0.6f, 100.0f, 0.9f, 0.8f, 0.2f);
-        x.Tone(1800.0f, 0.3f, 80.0f, 0.2f);
-        return x.Make(0.55f);
-    }
-    case Sfx::ChargeRelease: {  // the bolt slamming forward and locking on a round
-        Synth x(0.25f);
-        x.Tone(140.0f, 0.6f, 30.0f);
-        x.Tone(700.0f, 0.8f, 50.0f);
-        x.Tone(1900.0f, 0.5f, 70.0f);
-        x.NoiseBurst(1.0f, 70.0f, 0.8f, 0.7f);
-        return x.Make(0.8f);
-    }
     case Sfx::MagDrop: {        // an empty magazine clattering onto stone
         Synth x(0.35f);
         x.Tone(420.0f, 0.7f, 35.0f);
@@ -298,7 +261,7 @@ static void LoadReloadSteps(const std::string& path, Sound out[(int)ReloadStep::
 // The FAL's magazine change, recorded (fal_reload.mp3, 1.5 s): the release clicks
 // and the old magazine coming out, then the new one going in and being slapped
 // home. Each half plays on its moment in the animation; the slap is in the second.
-// Returns false (keeping the synthesized sounds) if the file isn't there.
+// Returns false if the file isn't there (the magazine change is then silent).
 static bool LoadFalReload(const std::string& path, Sound& out, Sound& in) {
     Wave w = LoadWave(path.c_str());
     if (w.data == nullptr) return false;
@@ -331,10 +294,13 @@ bool GameAudio::Load(const std::string& assetDir) {
     Sound falOut{}, falIn{};
     bool falRecorded = LoadFalReload(dir + "fal_reload.mp3", falOut, falIn);
     for (int k = 0; k < (int)Sfx::Count; k++) {
-        if (falRecorded && k == (int)Sfx::MagOut) sfx[k] = falOut;
-        else if (falRecorded && k == (int)Sfx::MagIn) sfx[k] = falIn;
-        else if (falRecorded && k == (int)Sfx::MagSlap) continue; // part of the recording's second half
-        else sfx[k] = MakeSfx((Sfx)k);
+        // The FAL's magazine change is the recording only (nothing plays if it's missing)
+        if (k == (int)Sfx::MagOut || k == (int)Sfx::MagIn) {
+            if (!falRecorded) continue;
+            sfx[k] = k == (int)Sfx::MagOut ? falOut : falIn;
+        } else {
+            sfx[k] = MakeSfx((Sfx)k);
+        }
         for (Sound& v : sfxVoices[k]) v = LoadSoundAlias(sfx[k]);
     }
 
