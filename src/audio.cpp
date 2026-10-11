@@ -245,6 +245,35 @@ static Sound LoadCleanSound(const std::string& path, bool trimEnd, float peak) {
     return snd;
 }
 
+// [from, to) seconds of a (32-bit float) wave as its own sound, scaled by `gain`,
+// with a short fade at each end so the cut doesn't click
+static Sound CutSound(const Wave& w, float from, float to, float gain) {
+    int a = (int)(from * w.sampleRate), b = (int)(to * w.sampleRate);
+    if (b > (int)w.frameCount) b = (int)w.frameCount;
+    if (a >= b) return Sound{};
+    Wave cut = WaveCopy(w);
+    WaveCrop(&cut, a, b);
+    float* c = (float*)cut.data;
+    int frames = (int)cut.frameCount, ch = (int)cut.channels;
+    int fadeIn = (int)(0.004f * cut.sampleRate), fadeOut = (int)(0.04f * cut.sampleRate);
+    for (int f = 0; f < frames; f++) {
+        float g = gain;
+        if (f < fadeIn) g *= (float)f / fadeIn;
+        if (f > frames - fadeOut) g *= (float)(frames - f) / fadeOut;
+        for (int j = 0; j < ch; j++) c[f * ch + j] *= g;
+    }
+    Sound snd = LoadSoundFromWave(cut);
+    UnloadWave(cut);
+    return snd;
+}
+
+static float Loudest(const Wave& w) {
+    const float* s = (const float*)w.data;
+    float loudest = 0.0f;
+    for (unsigned i = 0; i < w.frameCount * w.channels; i++) loudest = fmaxf(loudest, fabsf(s[i]));
+    return loudest;
+}
+
 // The reload recording, cut into its separate mechanical sounds. Times are
 // seconds into reload.mp3; each cut starts just before its click so playing it
 // at the animation's moment puts the click on the beat.
@@ -260,29 +289,26 @@ static void LoadReloadSteps(const std::string& path, Sound out[(int)ReloadStep::
     Wave w = LoadWave(path.c_str());
     if (w.data == nullptr) return;
     WaveFormat(&w, w.sampleRate, 32, w.channels);
-    const float* s = (const float*)w.data;
-    float loudest = 0.0f;
-    for (unsigned i = 0; i < w.frameCount * w.channels; i++) loudest = fmaxf(loudest, fabsf(s[i]));
+    float loudest = Loudest(w);
     float gain = loudest > 0.0f ? 0.8f / loudest : 1.0f;
-    for (int k = 0; k < (int)ReloadStep::Count; k++) {
-        Wave cut = WaveCopy(w);
-        int from = (int)(CUTS[k][0] * w.sampleRate), to = (int)(CUTS[k][1] * w.sampleRate);
-        if (to > (int)w.frameCount) to = (int)w.frameCount;
-        if (from >= to) { UnloadWave(cut); continue; }
-        WaveCrop(&cut, from, to);
-        float* c = (float*)cut.data;
-        int frames = (int)cut.frameCount, ch = (int)cut.channels;
-        int fadeIn = (int)(0.004f * cut.sampleRate), fadeOut = (int)(0.04f * cut.sampleRate);
-        for (int f = 0; f < frames; f++) {
-            float g = gain;
-            if (f < fadeIn) g *= (float)f / fadeIn;
-            if (f > frames - fadeOut) g *= (float)(frames - f) / fadeOut;
-            for (int j = 0; j < ch; j++) c[f * ch + j] *= g;
-        }
-        out[k] = LoadSoundFromWave(cut);
-        UnloadWave(cut);
-    }
+    for (int k = 0; k < (int)ReloadStep::Count; k++) out[k] = CutSound(w, CUTS[k][0], CUTS[k][1], gain);
     UnloadWave(w);
+}
+
+// The FAL's magazine change, recorded (fal_reload.mp3, 1.5 s): the release clicks
+// and the old magazine coming out, then the new one going in and being slapped
+// home. Each half plays on its moment in the animation; the slap is in the second.
+// Returns false (keeping the synthesized sounds) if the file isn't there.
+static bool LoadFalReload(const std::string& path, Sound& out, Sound& in) {
+    Wave w = LoadWave(path.c_str());
+    if (w.data == nullptr) return false;
+    WaveFormat(&w, w.sampleRate, 32, w.channels);
+    float loudest = Loudest(w);
+    float gain = loudest > 0.0f ? 0.85f / loudest : 1.0f;
+    out = CutSound(w, 0.00f, 0.62f, gain); // clicks at 0.04 and 0.16 s, the magazine out at 0.28 s
+    in = CutSound(w, 0.84f, 1.51f, gain);  // seating clicks from 0.05 s in, the slap 0.16-0.26 s in
+    UnloadWave(w);
+    return IsSoundValid(out) && IsSoundValid(in);
 }
 
 bool GameAudio::Load(const std::string& assetDir) {
@@ -302,8 +328,13 @@ bool GameAudio::Load(const std::string& assetDir) {
         otherWalk[i] = LoadSoundAlias(walk);
         otherRun[i] = LoadSoundAlias(run);
     }
+    Sound falOut{}, falIn{};
+    bool falRecorded = LoadFalReload(dir + "fal_reload.mp3", falOut, falIn);
     for (int k = 0; k < (int)Sfx::Count; k++) {
-        sfx[k] = MakeSfx((Sfx)k);
+        if (falRecorded && k == (int)Sfx::MagOut) sfx[k] = falOut;
+        else if (falRecorded && k == (int)Sfx::MagIn) sfx[k] = falIn;
+        else if (falRecorded && k == (int)Sfx::MagSlap) continue; // part of the recording's second half
+        else sfx[k] = MakeSfx((Sfx)k);
         for (Sound& v : sfxVoices[k]) v = LoadSoundAlias(sfx[k]);
     }
 
@@ -339,6 +370,7 @@ void GameAudio::Play(Sfx s, float volume, float pan) {
     if (!loaded) return;
     int k = (int)s;
     Sound& v = sfxVoices[k][sfxNext[k]];
+    if (!IsSoundValid(v)) return; // a sound with nothing to play (e.g. covered by a recording)
     sfxNext[k] = (sfxNext[k] + 1) % SFX_VOICES;
     SetSoundVolume(v, Clamp(volume, 0.0f, 1.0f));
     SetSoundPan(v, 0.5f - 0.5f * Clamp(pan, -1.0f, 1.0f));
