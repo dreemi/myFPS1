@@ -9,7 +9,7 @@ static const float HIT_REACT_TIME = 0.18f;
 static const float FALL_TIME = 0.55f;
 
 static const WeaponModels& ModelsOf(const SoldierView& s) {
-    return s.weapon == WEAPON_RIFLE ? FAL_MODELS : REVOLVER_MODELS;
+    return s.weapon == WEAPON_SNIPER ? SNIPER_MODELS : (s.weapon == WEAPON_RIFLE ? FAL_MODELS : REVOLVER_MODELS);
 }
 
 CharAnim SoldierAnim(float speed, bool crouching, bool grounded) {

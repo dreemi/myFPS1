@@ -1,4 +1,5 @@
 #include "weapon.hpp"
+#include "game/types.hpp"
 #include "raymath.h"
 #include <algorithm>
 #include <cstdio>
@@ -25,6 +26,22 @@ const WeaponDef FAL = {
     0.55f,           // each shot opens the spread a little
 };
 
+const WeaponDef L42A1 = {
+    "L42A1",
+    100, 200,        // 7.62 NATO from a heavy barrel: one shot
+    1.15f,           // the bolt: lifted, drawn back, pushed home and turned down between shots
+    10, 3.4f,        // 10-round magazine: bolt open, magazine changed, bolt closed
+    13.0f, 11.0f, 7.0f, 3.5f, 4.5f, 2.5f, // wild from the hip
+    0.025f,          // through the telescope, still: a tenth of a degree
+    false, 0.0f, 0.0f,
+    true,            // bolt action
+    19.0f,           // the telescope: about four times
+};
+
+const WeaponDef& WeaponDefOf(int weapon) {
+    return weapon == WEAPON_SNIPER ? L42A1 : (weapon == WEAPON_REVOLVER ? REVOLVER : FAL);
+}
+
 float WeaponDef::HipSpread(Stance stance) const {
     switch (stance) {
         case Stance::Airborne:     return spreadAirborne;
@@ -40,8 +57,12 @@ float WeaponDef::HipSpread(Stance stance) const {
 Weapon::Weapon(const WeaponDef& d, unsigned seed) : def(&d), ammo(d.magazineSize), spread(d.spreadStill), rng(seed) {}
 
 void Weapon::UpdateAim(float dt, bool wantAim) {
-    float target = (wantAim && reloadTimer <= 0.0f) ? 1.0f : 0.0f;
-    aimAmount += (target - aimAmount) * (1.0f - expf(-aimEaseRate * dt));
+    // A bolt action comes off the telescope to work the bolt (after a moment to see the hit)
+    float cycle = BoltCycleTime();
+    bool working = cycle >= 0.25f;
+    float target = (wantAim && reloadTimer <= 0.0f && !working) ? 1.0f : 0.0f;
+    float rate = working ? aimEaseRate * 2.0f : aimEaseRate;   // down off the telescope smartly
+    aimAmount += (target - aimAmount) * (1.0f - expf(-rate * dt));
     if (fabsf(target - aimAmount) < 0.001f) aimAmount = target;
 }
 
@@ -93,6 +114,7 @@ void Weapon::Reset() {
     aimAmount = 0.0f;
     spread = def->spreadStill;
     dryFire = false;
+    reloadQueued = false;
 }
 
 bool Weapon::StartReload() {
@@ -105,6 +127,7 @@ bool Weapon::StartReload() {
 
 void Weapon::CancelReload() {
     reloadTimer = 0.0f;
+    reloadQueued = false;
 }
 
 WeaponInput WeaponInput::FromKeyboardAndMouse() {
@@ -134,7 +157,13 @@ bool Weapon::Step(float dt, const WeaponInput& in, Stance stance, const Camera3D
     UpdateAim(dt, in.aim);
     Tick(dt, stance);
     if (IsReloading()) return false;
-    if (in.reload && StartReload()) return false;
+    // A bolt action finishes working its bolt before it can be reloaded
+    if (def->boltAction && cooldownTimer > 0.0f) {
+        if (in.reload) reloadQueued = true;
+        return false;
+    }
+    if ((in.reload || reloadQueued) && StartReload()) { reloadQueued = false; return false; }
+    reloadQueued = false;
 
     bool trigger = in.firePressed || (def->automatic && in.fireHeld);
     if (trigger && cooldownTimer <= 0.0f) {

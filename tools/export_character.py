@@ -344,7 +344,12 @@ arm.animation_data_create()
 CROUCH_DROP = 0.55
 
 
+ACTION = ""
+
+
 def make_action(name, frames, pose):
+    global ACTION
+    ACTION = name
     act = bpy.data.actions.new(name)
     act.use_fake_user = True
     arm.animation_data.action = act
@@ -376,6 +381,7 @@ make_action("crouch_walk", 36, lambda ph, f: (legs(ph, 0.22, 0.06, CROUCH_DROP, 
 # fp_rifle (FAL):      0 hip, 1..60 magazine swap (0..2 s), 61..78 finishing a
 #                      reload with a round chambered (2..2.6 s), 79..120 finishing
 #                      from empty: charging handle (2..3.4 s), 121..130 aiming
+# fp_sniper (L42A1):   0 hip, 1..36 working the bolt, 37..136 reload, 137..146 aiming
 FP_HIP_PALM = Vector((-0.19, -0.464, -0.22))   # revolver: 19 cm right, 46 cm ahead, 22 cm down
 FP_ADS_PALM = Vector((0.0, -0.404, -0.132))    # revolver: centred under the line of sight
 MODEL_TO_BLENDER = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))  # glTF (Y up) -> Blender (Z up)
@@ -533,7 +539,7 @@ def pose_left_keys(rig, keys, t, cam):
     pb_, fb, nb = rig.key_in_blender(b, cam)
     miss = place_left(pa.lerp(pb_, s), fa.lerp(fb, s).normalized(), na.lerp(nb, s).normalized())
     if miss > 0.01:
-        log("fp t=%.2f: left palm misses by %.0f mm" % (t, miss * 1000))
+        log("%s t=%.2f: left palm misses by %.0f mm" % (ACTION, t, miss * 1000))
 
 
 # --- The revolver ---------------------------------------------------------------------
@@ -787,6 +793,204 @@ def fp_rifle_pose(ph, f):
 make_action("fp_rifle", FAL_FRAMES, fp_rifle_pose)
 
 
+# --- The L42A1 ----------------------------------------------------------------------------
+# fp_sniper: 0 hip, 1..36 working the bolt after a shot (0..1.15 s), 37..136 the reload
+# (3.4 s: bolt open, magazine changed, bolt closed), 137..146 aiming. The game moves the
+# gun by the pose keys below (the bolt's side, then the magazine, turned toward the eye)
+# while the arms stay with the body, so both hands are placed on the gun where the keys put
+# it: the right hand leaves the wrist for the bolt knob and comes back, the left changes the
+# magazine. Times, keys and positions must match src/sniper_view.cpp.
+L42 = read_gun_txt("l42")
+L42_RIG = FpRig(1.0, (0.10, -0.17, -0.10), -2.5, tuple(L42["hand_grip"]), (0.0, -L42["front_sight"].y, -0.165))
+SNIPER_FRAMES = 147
+CYCLE_FIRST, CYCLE_LAST, CYCLE_END = 1, 36, 1.15
+RELOAD_FIRST, RELOAD_LAST, RELOAD_END = 37, 136, 3.4
+SNIPER_ADS_FIRST = 137
+# Gun pose keys - as sniper_view.cpp (CYCLE_KEYS, RELOAD_KEYS)
+BOLT_POSE = (-0.030, 0.000, -0.060, -22.0, -16.0, 32.0)
+MAG_POSE = (-0.020, 0.020, -0.140, 20.0, 0.0, -20.0)
+SNIPER_CYCLE_KEYS = [(0.00, 0, 0, 0, 0, 0, 0), (0.30, 0, 0, 0, 0, 0, 0), (0.42,) + BOLT_POSE, (0.92,) + BOLT_POSE,
+                     (1.15, 0, 0, 0, 0, 0, 0)]
+SNIPER_RELOAD_KEYS = [(0.00, 0, 0, 0, 0, 0, 0), (0.30,) + BOLT_POSE, (0.70,) + BOLT_POSE,
+                      (0.95,) + MAG_POSE, (2.30,) + MAG_POSE[:5] + (-22.0,), (2.55,) + BOLT_POSE, (3.00,) + BOLT_POSE,
+                      (3.40, 0, 0, 0, 0, 0, 0)]
+SNIPER_SUPPORT = ((L42["handguard"].x - 0.004, L42["handguard"].y - 0.018, L42["handguard"].z), (1.0, 0.5, -0.2),
+                  (0.0, 1.0, 0.0))
+SNIPER_PALM_ON_MAG = (-0.034, -0.032, L42["mag_centre"].z)   # as sniper_view.cpp: the palm on the magazine's left side
+SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL = (0.3, -0.4, -1.0), (1.0, 0.0, 0.0)
+
+
+def knob_at(lift, back):
+    """The bolt knob (gun space) with the handle turned up by `lift` and drawn back by `back` (0..1)."""
+    k, a = L42["bolt_knob"], L42["bolt_axis"]
+    ang = math.radians(lift * L42["bolt_lift"])
+    x, y = k.x - a.x, k.y - a.y
+    return Vector((a.x + x * math.cos(ang) - y * math.sin(ang), a.y + x * math.sin(ang) + y * math.cos(ang),
+                   k.z + back * L42["bolt_travel"]))
+
+
+# The right hand on the knob, as seen from the eye (camera space, however the gun is turned):
+# coming from below and to the right, fingers reaching forward and up over it, the palm
+# facing up and in. So the wrist and forearm stay low and out to the right, clear of the view.
+KNOB_PALM = (0.020, -0.022, 0.008)
+KNOB_FINGERS = (-0.50, 0.40, -0.77)
+KNOB_NORMAL = (-0.60, 0.45, -0.66)
+
+
+# Right hand keys: (seconds, "grip") on the wrist, or (seconds, "knob", lift, back)
+CYCLE_RIGHT = [(0.00, "grip"), (0.28, "grip"), (0.40, "knob", 0.0, 0.0), (0.46, "knob", 1.0, 0.0),
+               (0.50, "knob", 1.0, 0.0), (0.70, "knob", 1.0, 1.0), (0.72, "knob", 1.0, 1.0), (0.80, "knob", 1.0, 0.0),
+               (0.86, "knob", 1.0, 0.0), (0.92, "knob", 0.0, 0.0), (1.10, "grip"), (1.15, "grip")]
+RELOAD_RIGHT = [(0.00, "grip"), (0.15, "grip"), (0.35, "knob", 0.0, 0.0), (0.41, "knob", 1.0, 0.0),
+                (0.45, "knob", 1.0, 0.0), (0.65, "knob", 1.0, 1.0), (0.70, "knob", 1.0, 1.0), (0.90, "grip"),
+                (2.40, "grip"), (2.60, "knob", 1.0, 1.0), (2.70, "knob", 1.0, 0.0), (2.88, "knob", 1.0, 0.0),
+                (2.94, "knob", 0.0, 0.0), (2.98, "knob", 0.0, 0.0), (3.18, "grip"), (3.40, "grip")]
+
+
+def sniper_left_keys():
+    G = "gun"
+    m = SNIPER_PALM_ON_MAG
+    p, fi, n = SNIPER_SUPPORT
+    under = (G, (p[0], p[1], p[2] + 0.06), fi, n)   # back along the forend (the gun pushed out to see the bolt)
+    return [
+        (0.00, "support", None, None, None),
+        (0.25,) + under,
+        (0.40,) + under,
+        (0.75, G, m, SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),                                  # thumb on the catch
+        (0.85, G, m, SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),
+        (1.00, G, (m[0], m[1] - 0.080, m[2]), SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),         # pulled down, let go
+        (1.20,) + POUCH,                                                                      # a fresh one from the pouch
+        (1.45,) + POUCH,
+        (1.75, G, (m[0], m[1] - 0.090, m[2]), SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),         # up under the well
+        (1.85, G, (m[0], m[1] - 0.075, m[2]), SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),
+        (2.20, G, m, SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),                                  # pushed home
+        (2.30, G, (m[0], m[1] - 0.010, m[2]), SNIPER_MAG_FINGERS, SNIPER_MAG_NORMAL),
+        (2.50,) + under,
+        (3.00,) + under,
+        (3.30, "support", None, None, None),
+        (3.40, "support", None, None, None),
+    ]
+
+
+SNIPER_LEFT = None
+FP_SNIPER_LEFT = {}
+SNIPER_PALM0 = None
+GRIP_R = None   # (palm, fingers, normal) of the right hand on the wrist, Blender space
+
+
+def hold_sniper_right(cam):
+    """The right hand round the wrist of the stock, with the rifle at `cam`."""
+    palm = L42_RIG.cam_to_blender @ cam @ (L42_RIG.hand_grip * L42_RIG.scale)
+    wrist = palm + (L42_RIG.H0.translation - SNIPER_PALM0)
+    two_bone("upperarm_r", "lowerarm_r", wrist, Vector((-0.6, 0.2, -1.0)))
+    point("hand_r", Vector((0.0, -1.0, -0.40)))
+    roll_palm("r", Vector((1.0, 0.0, 0.0)))
+    grip_hand("r", trigger_finger=True)
+
+
+def place_right(palm, fingers, normal, pole=Vector((-1.0, 0.3, -0.35))):
+    """Reach so the right palm centre lands on `palm` (Blender space). The elbow swings out to
+    the side (not down under the eye), so working the bolt the forearm comes in from the right."""
+    target = palm.copy()
+    for _ in range(3):
+        two_bone("upperarm_r", "lowerarm_r", target, pole)
+        point("hand_r", fingers)
+        roll_palm("r", normal)
+        target = target + (palm - palm_center("r"))
+    return (palm - palm_center("r")).length
+
+
+def right_key_in_blender(key, cam):
+    if key[1] == "grip":   # the hold on the wrist, carried with the gun
+        m = L42_RIG.motion(cam)
+        return m @ GRIP_R[0], (m.to_3x3() @ GRIP_R[1]).normalized(), (m.to_3x3() @ GRIP_R[2]).normalized()
+    knob = cam @ (knob_at(key[2], key[3]) * L42_RIG.scale)        # camera space
+    m = L42_RIG.cam_to_blender
+    rot = m.to_3x3().normalized()
+    return m @ (knob + Vector(KNOB_PALM)), (rot @ Vector(KNOB_FINGERS)).normalized(), (rot @ Vector(KNOB_NORMAL)).normalized()
+
+
+def pose_right_keys(keys, t, cam):
+    i = 0
+    while i < len(keys) - 2 and t > keys[i + 1][0]:
+        i += 1
+    a, b = keys[i], keys[i + 1]
+    s = max(0.0, min(1.0, (t - a[0]) / (b[0] - a[0])))
+    s = s * s * (3 - 2 * s)
+    if a[1] == "grip" and b[1] == "grip":
+        hold_sniper_right(cam)
+        return
+    pa, fa, na = right_key_in_blender(a, cam)
+    pb_, fb, nb = right_key_in_blender(b, cam)
+    miss = place_right(pa.lerp(pb_, s), fa.lerp(fb, s).normalized(), na.lerp(nb, s).normalized())
+    on_knob = (a[1] == "knob" and s < 0.5) or (b[1] == "knob" and s >= 0.5)
+    grip_hand("r", tight=True) if on_knob else grip_hand("r", trigger_finger=True)
+    if miss > 0.01:
+        log("fp_sniper t=%.2f: right palm misses by %.0f mm" % (t, miss * 1000))
+
+
+def fp_sniper_pose(ph, f):
+    global SNIPER_LEFT, SNIPER_PALM0, GRIP_R
+    eye = find_eye()
+    if L42_RIG.cam_to_blender is None:
+        reset()
+        guess = L42_RIG.gun_in_camera() @ (L42_RIG.hand_grip * L42_RIG.scale)
+        wrist = eye + Vector((-guess.x, guess.z, guess.y)) + Vector((0.0, 0.03, 0.04))
+        two_bone("upperarm_r", "lowerarm_r", wrist, Vector((-0.6, 0.2, -1.0)))
+        point("hand_r", Vector((0.0, -1.0, -0.40)))
+        roll_palm("r", Vector((1.0, 0.0, 0.0)))
+        grip_hand("r", trigger_finger=True)
+        L42_RIG.calibrate()
+        SNIPER_PALM0 = palm_center("r")
+        hold_sniper_right(L42_RIG.gun_in_camera())
+        hand = pbones["hand_r"]
+        GRIP_R = (palm_center("r"), (hand.tail - hand.head).normalized(), palm_normal("r"))
+        cam0 = L42_RIG.gun_in_camera()
+        p, fi, n = L42_RIG.key_in_blender((0, "gun") + SNIPER_SUPPORT, cam0)
+        grip_hand("l", tight=False)
+        place_left(p, fi, n, Vector((0.5, 0.2, -1.0)))
+        L42_RIG.remember_support()
+        SNIPER_LEFT = sniper_left_keys()
+        reset()
+
+    # (fingers curl relative to where they are: each hand is posed once per frame)
+    def left_support(cam, aim=0.0, slide=0.0):
+        grip_hand("l", tight=True)
+        palm, fingers, normal = SNIPER_SUPPORT
+        # aimed, the hand slides back along the forend; working the bolt (the gun pushed out to
+        # see it) it slides back too
+        palm = (palm[0], palm[1], palm[2] + 0.06 * aim + slide)
+        p, fi, n = L42_RIG.key_in_blender((0, "gun", palm, fingers, normal), cam)
+        miss = place_left(p, fi, n, Vector((0.5, 0.2, -1.0)))
+        if miss > 0.01:
+            log("fp_sniper frame %d: support hand misses the forend by %.0f mm" % (f, miss * 1000))
+
+    def support_hold(cam, aim=0.0):
+        hold_sniper_right(cam)
+        left_support(cam, aim)
+
+    if f >= SNIPER_ADS_FIRST:
+        aim = (f - SNIPER_ADS_FIRST) / (SNIPER_FRAMES - 1 - SNIPER_ADS_FIRST)
+        support_hold(L42_RIG.gun_in_camera(aim=aim), aim)
+    elif CYCLE_FIRST <= f <= CYCLE_LAST:
+        t = (f - CYCLE_FIRST) / (CYCLE_LAST - CYCLE_FIRST) * CYCLE_END
+        cam = L42_RIG.gun_in_camera(SNIPER_CYCLE_KEYS, t)
+        left_support(cam, slide=-pose_curve(SNIPER_CYCLE_KEYS, t, 2))
+        pose_right_keys(CYCLE_RIGHT, t, cam)
+    elif RELOAD_FIRST <= f <= RELOAD_LAST:
+        t = (f - RELOAD_FIRST) / (RELOAD_LAST - RELOAD_FIRST) * RELOAD_END
+        cam = L42_RIG.gun_in_camera(SNIPER_RELOAD_KEYS, t)
+        grip_hand("l", tight=True)
+        pose_left_keys(L42_RIG, SNIPER_LEFT, t, cam)
+        pose_right_keys(RELOAD_RIGHT, t, cam)
+    else:
+        support_hold(L42_RIG.gun_in_camera())
+    FP_SNIPER_LEFT[f] = palm_center("l")
+
+
+make_action("fp_sniper", SNIPER_FRAMES, fp_sniper_pose)
+
+
 # --- 7. Grip points (palm centre of the right hand) ----------------------
 def grip_point():
     hand, mid = pbones["hand_r"], pbones["middle_01_r"]
@@ -805,6 +1009,8 @@ pose_at("fp_hold", 0)
 fp_grip = grip_point()
 pose_at("fp_rifle", 0)
 fp_rifle_grip = grip_point()
+pose_at("fp_sniper", 0)
+fp_sniper_grip = grip_point()
 reset()
 arm.animation_data.action = None
 
@@ -835,6 +1041,7 @@ lines.append("aim_grip %.4f %.4f %.4f" % to_gltf(aim_grip))
 lines.append("aim_hand %.4f %.4f %.4f" % to_gltf(aim_hand))
 lines.append("fp_grip %.4f %.4f %.4f" % to_gltf(fp_grip))
 lines.append("fp_rifle_grip %.4f %.4f %.4f" % to_gltf(fp_rifle_grip))
+lines.append("fp_sniper_grip %.4f %.4f %.4f" % to_gltf(fp_sniper_grip))
 lines.append("eye %.4f %.4f %.4f" % to_gltf(EYE))
 lines.append("# fp_hold frames: 0 hip, %d..%d reload (%.1f s), %d..%d aim; left palm centre per frame (model space)"
              % (REV_RELOAD_FIRST, REV_RELOAD_LAST, REV_RELOAD_SECONDS, REV_ADS_FIRST, REV_FRAMES - 1))
@@ -843,6 +1050,9 @@ for f in sorted(FP_LEFT_PALM):
 lines.append("# fp_rifle frames: 0 hip, 1..60 magazine swap, 61..78 finish, 79..120 finish from empty, 121..130 aim")
 for f in sorted(FP_RIFLE_LEFT):
     lines.append("fp_rifle_left %d %.4f %.4f %.4f" % ((f,) + to_gltf(FP_RIFLE_LEFT[f])))
+lines.append("# fp_sniper frames: 0 hip, 1..36 working the bolt, 37..136 reload, 137..146 aim")
+for f in sorted(FP_SNIPER_LEFT):
+    lines.append("fp_sniper_left %d %.4f %.4f %.4f" % ((f,) + to_gltf(FP_SNIPER_LEFT[f])))
 with open(os.path.join(OUT_DIR, "character.txt"), "w") as fh:
     fh.write("\n".join(lines) + "\n")
 log("\n".join(lines))

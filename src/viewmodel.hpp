@@ -21,7 +21,8 @@ ViewModelMotion MotionOf(const Player& player);
 // Mechanical sounds a viewmodel's animation makes (played by the game)
 enum class ViewSound {
     Latch, Open, Eject, Insert, Spin, Close,       // revolver reload
-    MagOut, MagIn, Slap, ChargeBack, ChargeRelease // rifle reload
+    MagOut, MagIn, Slap, ChargeBack, ChargeRelease, // rifle reload
+    BoltOpen, BoltClose, BoltCloseReload, SniperMagIn // sniper: working the bolt, its reload
 };
 
 // Things the viewmodel's animation did this frame that the rest of the game
@@ -100,10 +101,14 @@ protected:
     virtual ArmsClip Clip() const = 0;
     virtual float ArmsFrame(const Weapon& weapon) const = 0;
     virtual Vector3 ArmsGrip(const Weapon& weapon) const; // model-space palm pinned to the grip
-    bool HandDriven(const Weapon& weapon) const;          // the reload moves the gun with the right hand
+    virtual bool HandDriven(const Weapon& weapon) const;  // the reload moves the gun with the right hand
     bool HaveArms() const { return arms && arms->loaded; }
-    // Gun placement before the arms' reload handling; extra = per-weapon offsets (fallback reload keys)
-    Matrix BaseGunToCamera(const Weapon& weapon) const;
+    // Gun placement before the arms' reload handling; withPose adds the per-weapon reload keys
+    // (FallbackReloadPose) when the hand isn't carrying the gun
+    Matrix BaseGunToCamera(const Weapon& weapon, bool withPose = true) const;
+    // Where the arms are anchored (their grip on the gun's placement): the gun's own, unless the
+    // arms were authored reaching for a gun that the reload keys move about (the sniper rifle)
+    virtual Matrix ArmsAnchor(const Weapon& weapon) const { return BaseGunToCamera(weapon); }
     virtual ReloadPose FallbackReloadPose() const { return {}; }
     Camera3D BeginViewPass() const; // depth cleared, camera at the origin: call before BeginMode3D
 

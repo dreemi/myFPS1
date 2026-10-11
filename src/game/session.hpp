@@ -32,6 +32,7 @@ struct SessionConfig {
     uint16_t port = 27015;
     int bots = 1;                         // hosting / offline
     MapId map = MapId::Redoubt;           // hosting / offline (a client gets the host's)
+    int playerClass = CLASS_STANDARD;     // the loadout to play with
 };
 
 // One frame of the local player's intent, from the keyboard and mouse

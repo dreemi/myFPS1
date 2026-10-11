@@ -210,7 +210,7 @@ static Sound LoadCleanSound(const std::string& path, bool trimEnd, float peak) {
 
 // [from, to) seconds of a (32-bit float) wave as its own sound, scaled by `gain`,
 // with a short fade at each end so the cut doesn't click
-static Sound CutSound(const Wave& w, float from, float to, float gain) {
+static Sound CutSound(const Wave& w, float from, float to, float gain, float fadeOutSeconds = 0.04f) {
     int a = (int)(from * w.sampleRate), b = (int)(to * w.sampleRate);
     if (b > (int)w.frameCount) b = (int)w.frameCount;
     if (a >= b) return Sound{};
@@ -218,7 +218,7 @@ static Sound CutSound(const Wave& w, float from, float to, float gain) {
     WaveCrop(&cut, a, b);
     float* c = (float*)cut.data;
     int frames = (int)cut.frameCount, ch = (int)cut.channels;
-    int fadeIn = (int)(0.004f * cut.sampleRate), fadeOut = (int)(0.04f * cut.sampleRate);
+    int fadeIn = (int)(0.004f * cut.sampleRate), fadeOut = (int)(fadeOutSeconds * cut.sampleRate);
     for (int f = 0; f < frames; f++) {
         float g = gain;
         if (f < fadeIn) g *= (float)f / fadeIn;
@@ -274,6 +274,45 @@ static bool LoadFalReload(const std::string& path, Sound& out, Sound& in) {
     return IsSoundValid(out) && IsSoundValid(in);
 }
 
+// The L42A1 (l42.mp3, 7 s: a Kar98k, the same kind of action): two shots with their echo,
+// the bolt worked, rounds loaded and the bolt closed again. Cut into the report and the
+// bolt's sounds; each cut starts just before its first click (times noted are from its
+// start) so playing it at the animation's moment puts the click on the beat.
+// Returns false if the file isn't there (the rifle is then silent).
+static bool LoadSniperSounds(const std::string& path, Sound out[5]) {
+    Wave w = LoadWave(path.c_str());
+    if (w.data == nullptr) return false;
+    WaveFormat(&w, w.sampleRate, 32, w.channels);
+    float loudest = Loudest(w);
+    float gain = loudest > 0.0f ? 0.9f / loudest : 1.0f;
+    out[0] = CutSound(w, 0.095f, 1.90f, gain, 0.5f);   // the shot at 0.015 s, its echo rolling away
+    out[1] = CutSound(w, 2.80f, 3.24f, gain);          // bolt open: the handle up at 0.05 s, back at 0.30 s
+    out[2] = CutSound(w, 3.78f, 4.08f, gain);          // bolt closed: home at 0.06 s, the handle down at 0.18 s
+    out[3] = CutSound(w, 6.36f, 6.80f, gain);          // closed on a fresh magazine: home at 0.05-0.09 s, down at 0.31 s
+    // The magazine pushed home: steel scraping in the well (4.98..5.30 s), then the click that
+    // seats it (5.62 s on), spliced so the click comes 0.36 s in
+    {
+        int rate = w.sampleRate, ch = w.channels;
+        int a0 = (int)(4.98f * rate), a1 = (int)(5.30f * rate), b0 = (int)(5.62f * rate), b1 = (int)(5.84f * rate);
+        int scrape = a1 - a0, n = scrape + (b1 - b0);
+        Wave m = WaveCopy(w);
+        WaveCrop(&m, 0, n);
+        float* d = (float*)m.data;
+        const float* src = (const float*)w.data;
+        for (int f = 0; f < n; f++) {
+            int from = f < scrape ? a0 + f : b0 + (f - scrape);
+            float g = f < scrape ? 0.6f * gain * fminf(1.0f, f / (0.004f * rate)) * fminf(1.0f, (scrape - f) / (0.02f * rate))
+                                 : gain * fminf(1.0f, (f - scrape) / (0.002f * rate)) * fminf(1.0f, (n - f) / (0.04f * rate));
+            for (int c = 0; c < ch; c++) d[f * ch + c] = src[from * ch + c] * g;
+        }
+        out[4] = LoadSoundFromWave(m);
+        UnloadWave(m);
+    }
+    UnloadWave(w);
+    for (int i = 0; i < 5; i++) if (!IsSoundValid(out[i])) return false;
+    return true;
+}
+
 bool GameAudio::Load(const std::string& assetDir) {
     std::string dir = assetDir + "sounds/";
     gunshot = LoadCleanSound(dir + "gunshot.mp3", false, 0.9f);
@@ -293,7 +332,16 @@ bool GameAudio::Load(const std::string& assetDir) {
     }
     Sound falOut{}, falIn{};
     bool falRecorded = LoadFalReload(dir + "fal_reload.mp3", falOut, falIn);
+    Sound sniper[5]{};
+    bool sniperRecorded = LoadSniperSounds(dir + "l42.mp3", sniper);
     for (int k = 0; k < (int)Sfx::Count; k++) {
+        // The L42A1's sounds are its recording only
+        if (k >= (int)Sfx::SniperShot && k <= (int)Sfx::SniperMagIn) {
+            if (!sniperRecorded) continue;
+            sfx[k] = sniper[k - (int)Sfx::SniperShot];
+            for (Sound& v : sfxVoices[k]) v = LoadSoundAlias(sfx[k]);
+            continue;
+        }
         // The FAL's magazine change is the recording only (nothing plays if it's missing)
         if (k == (int)Sfx::MagOut || k == (int)Sfx::MagIn) {
             if (!falRecorded) continue;
@@ -371,6 +419,14 @@ void GameAudio::StopFootstepsFrom(int firstSlot) {
     if (!loaded) return;
     for (int i = firstSlot < 0 ? 0 : firstSlot; i < FOOTSTEP_SLOTS; i++)
         for (Sound* s : { &otherWalk[i], &otherRun[i] }) if (IsSoundPlaying(*s)) PauseSound(*s);
+}
+
+void GameAudio::PlaySniperShotAt(Vector3 source, Vector3 ear, Vector3 right) {
+    Vector3 to = Vector3Subtract(source, ear);
+    float dist = Vector3Length(to);
+    float volume = 0.95f / (1.0f + dist / 12.0f); // the loudest thing on the map, heard furthest
+    float pan = dist > 0.01f ? Vector3DotProduct(Vector3Scale(to, 1.0f / dist), right) * 0.8f : 0.0f;
+    Play(Sfx::SniperShot, volume, pan);
 }
 
 void GameAudio::PlayRifleShotAt(Vector3 source, Vector3 ear, Vector3 right) {

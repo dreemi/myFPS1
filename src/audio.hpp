@@ -8,7 +8,9 @@
 enum class Sfx {
     ImpactConcrete, ImpactSteel, ImpactWood, FleshHit, HitTick, Headshot, KillConfirm,
     BulletCrack, Hurt, DryFire, Land, CasingTink,
-    RifleBoom, MagOut, MagIn, MagDrop, WeaponDraw, Count
+    RifleBoom, MagOut, MagIn, MagDrop, WeaponDraw,
+    SniperShot, BoltOpen, BoltClose, BoltCloseReload, SniperMagIn, // cut from the L42A1's recording (l42.mp3)
+    Count
 };
 
 // The revolver's reload, step by step (cut from the reload recording so each
@@ -49,6 +51,9 @@ public:
     void StopFootstepsFrom(int firstSlot); // silence every slot from firstSlot on
     // Another player's rifle, heard from where they are
     void PlayRifleShotAt(Vector3 source, Vector3 ear, Vector3 right);
+    // The L42A1: its recorded report, echo and all (yours, and someone else's from where they are)
+    void PlaySniperShot(float volume, float pan) { Play(Sfx::SniperShot, volume, pan); }
+    void PlaySniperShotAt(Vector3 source, Vector3 ear, Vector3 right);
 
 private:
     static const int GUNSHOT_VOICES = 6; // so rapid/overlapping shots don't cut each other off

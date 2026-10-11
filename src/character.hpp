@@ -8,7 +8,7 @@
 // (hips and legs, seen when looking down), and for the first-person arms.
 // Model space: meters, Y up, facing +Z, the character's right is -X.
 
-enum class CharAnim { Idle, Walk, Run, Crouch, CrouchWalk, FpHold, Rest, FpRifle, Count };
+enum class CharAnim { Idle, Walk, Run, Crouch, CrouchWalk, FpHold, Rest, FpRifle, FpSniper, Count };
 
 // Which parts of the mesh to draw (see tools/export_character.py)
 enum CharPart {
@@ -29,7 +29,8 @@ struct CharacterAssets {
     Vector3 aimGrip{};           // right palm centre in the idle (aiming) pose
     Vector3 fpGrip{};            // right palm centre in the first-person revolver hold
     Vector3 fpRifleGrip{};       // right palm centre in the first-person rifle hold
-    std::vector<Vector3> leftPalm[(int)CharAnim::Count]; // left palm centre per Blender frame (fp_hold, fp_rifle)
+    Vector3 fpSniperGrip{};      // ...and the sniper rifle's
+    std::vector<Vector3> leftPalm[(int)CharAnim::Count]; // left palm centre per Blender frame (fp_hold, fp_rifle, fp_sniper)
     int handBone = -1;           // hand_r
     int headBone = -1;           // head (helmets ride on it)
     bool loaded = false;
@@ -64,5 +65,10 @@ const float FPR_SWAP_FIRST = 1.0f, FPR_SWAP_LAST = 60.0f;        // 0 .. 2.0 s
 const float FPR_TACTICAL_FIRST = 61.0f, FPR_TACTICAL_LAST = 78.0f; // 2.0 .. 2.6 s
 const float FPR_EMPTY_FIRST = 79.0f, FPR_EMPTY_LAST = 120.0f;      // 2.0 .. 3.4 s
 const float FPR_ADS_FIRST = 121.0f, FPR_LAST_FRAME = 130.0f;
+// fp_sniper's frames: working the bolt after a shot, the reload (bolt open, magazine
+// changed, bolt closed), then aiming
+const float FPS_CYCLE_FIRST = 1.0f, FPS_CYCLE_LAST = 36.0f;       // 0 .. 1.15 s after the shot
+const float FPS_RELOAD_FIRST = 37.0f, FPS_RELOAD_LAST = 136.0f;   // 0 .. 3.4 s
+const float FPS_ADS_FIRST = 137.0f, FPS_LAST_FRAME = 146.0f;
 // Left palm centre (model space) at a Blender frame of a first-person animation, interpolated
 Vector3 CharacterFpLeftPalm(const CharacterAssets& c, CharAnim anim, float blenderFrame);

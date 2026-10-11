@@ -154,7 +154,7 @@ Matrix WeaponView::ArmsToCamera(const Weapon& weapon) const {
     Vector3 h = Vector3Scale(models->handGrip, s);
     Matrix toGun = MatrixMultiply(MatrixMultiply(MatrixTranslate(-g.x, -g.y, -g.z), MatrixRotateY(PI)),
                                   MatrixTranslate(h.x, h.y, h.z));
-    return MatrixMultiply(MatrixMultiply(toGun, MatrixScale(1.0f / s, 1.0f / s, 1.0f / s)), BaseGunToCamera(weapon));
+    return MatrixMultiply(MatrixMultiply(toGun, MatrixScale(1.0f / s, 1.0f / s, 1.0f / s)), ArmsAnchor(weapon));
 }
 
 Matrix WeaponView::GunToCamera(const Weapon& weapon) const {
@@ -170,7 +170,7 @@ Matrix WeaponView::GunToCamera(const Weapon& weapon) const {
     return MatrixMultiply(MatrixMultiply(MatrixMultiply(base, MatrixInvert(armsToCam)), moved), armsToCam);
 }
 
-Matrix WeaponView::BaseGunToCamera(const Weapon& weapon) const {
+Matrix WeaponView::BaseGunToCamera(const Weapon& weapon, bool withPose) const {
     const WeaponModels& m = *models;
     float aim = weapon.GetAimAmount();
     float aimS = aim * aim * (3.0f - 2.0f * aim);  // eased: settles onto the sights
@@ -228,7 +228,7 @@ Matrix WeaponView::BaseGunToCamera(const Weapon& weapon) const {
     roll += kickRoll.x;
 
     // Reloading without arms to carry the gun: the choreographed handling
-    if (!HandDriven(weapon)) {
+    if (withPose && !HandDriven(weapon)) {
         ReloadPose r = FallbackReloadPose();
         offset = Vector3Add(offset, { r.x, r.y, r.z });
         pitch += r.pitch;

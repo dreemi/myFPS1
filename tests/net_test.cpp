@@ -169,6 +169,66 @@ int main() {
         CHECK(std::isfinite(b->body.GetFeet().x) && moved < 0.5f, "NaN and oversized commands do no harm (moved %.2f m)", moved);
     }
 
+    std::printf("Sniper class\n");
+    {
+        GameSim sim(world, 0, 1);
+        SimPlayer* a = sim.AddPlayer("A", CLASS_SNIPER);
+        SimPlayer* b = sim.AddPlayer("B");
+        CHECK(a->PrimaryWeapon() == WEAPON_SNIPER && &a->rifle.GetDef() == &L42A1 && a->rifle.GetAmmo() == 10,
+              "a sniper carries the L42A1, ten rounds");
+        CHECK(b->PrimaryWeapon() == WEAPON_RIFLE && &b->rifle.GetDef() == &FAL, "the standard class keeps the FAL");
+        CHECK(a->View().weapon == WEAPON_SNIPER, "and others see the L42A1 in a sniper's hands");
+
+        PlayerState sa = a->body.GetState(), sb = b->body.GetState();
+        sa.feet = { 0, 0, -9 };
+        sb.feet = { 0, 0, 9 };
+        a->body.SetState(sa);
+        b->body.SetState(sb);
+        sim.Update(DT);
+        float yaw, pitch;
+        LookAt(*a, Vector3Add(b->body.GetFeet(), { 0, 1.0f, 0 }), yaw, pitch);
+        uint32_t seq = 1;
+        // Raise the telescope: the view narrows to its field
+        for (int i = 0; i < 40; i++) { sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, BTN_AIM, sim.Time())); sim.Update(DT); }
+        CHECK(a->rifle.IsScoped() && fabsf(a->body.GetCamera().fovy - L42A1.scopeFovy) < 0.01f,
+              "aimed, it's through the telescope (field of view %.1f)", a->body.GetCamera().fovy);
+        // One shot to the body kills; holding the trigger doesn't fire again until the bolt's worked
+        int shots = 0, kills = 0;
+        bool sniperShot = false;
+        float aimDuringBolt = 1.0f;
+        for (int i = 0; i < 60; i++) {
+            uint16_t buttons = BTN_AIM | BTN_FIRE | (i == 0 ? BTN_FIRE_PRESSED : 0) | (i == 10 ? BTN_RELOAD : 0);
+            sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, buttons, sim.Time()));
+            sim.Update(DT);
+            if (i == 40) aimDuringBolt = a->rifle.GetAimAmount();
+            for (const GameEvent& e : sim.TakeEvents()) {
+                if (e.type == EventType::Shot && e.actor == a->id) { shots++; sniperShot = e.weapon == WEAPON_SNIPER; }
+                if (e.type == EventType::Killed && e.actor == a->id && e.target == b->id && e.weapon == WEAPON_SNIPER) kills++;
+            }
+        }
+        CHECK(kills == 1, "one body shot kills");
+        CHECK(shots == 1 && sniperShot, "a second shot waits for the bolt (%d shot%s in a second)", shots, shots == 1 ? "" : "s");
+        CHECK(aimDuringBolt < 0.1f, "working the bolt takes the eye off the telescope (aim %.2f)", aimDuringBolt);
+        CHECK(!a->rifle.IsReloading(), "a reload asked for mid-bolt waits...");
+        for (int i = 0; i < 20; i++) { sim.ApplyCommand(a->id, Command(seq++, yaw, pitch, 0, sim.Time())); sim.Update(DT); }
+        CHECK(a->rifle.IsReloading(), "...and starts once the bolt's closed");
+
+        // On the wire: the class in the hello, the rifle in snapshots and events
+        Proto::Hello h{ Proto::VERSION, "S", CLASS_SNIPER }, hb;
+        CHECK(Proto::DecodeHello(Proto::EncodeHello(h), hb) && hb.playerClass == CLASS_SNIPER, "the class travels in the hello");
+        Proto::Snapshot snap;
+        snap.players.push_back({ a->View(), 0, 0, 0, 0 });
+        Proto::Snapshot back;
+        CHECK(Proto::DecodeSnapshot(Proto::EncodeSnapshot(snap), back) && back.players[0].view.weapon == WEAPON_SNIPER,
+              "and the rifle in snapshots");
+        GameEvent ev;
+        ev.type = EventType::Shot;
+        ev.weapon = WEAPON_SNIPER;
+        std::vector<GameEvent> evs;
+        CHECK(Proto::DecodeEvents(Proto::EncodeEvents({ ev }), evs) && evs.size() == 1 && evs[0].weapon == WEAPON_SNIPER,
+              "and in events");
+    }
+
     std::printf("Helmets\n");
     {
         CHECK(ShotFromBehind({ 0, 0, 1 }, { 0, 0, 1 }), "a shot travelling the way the head faces comes from behind");
@@ -335,6 +395,7 @@ int main() {
         cc.address = "127.0.0.1";
         cc.port = port;
         cc.map = MapId::Dustyard;
+        cc.playerClass = CLASS_SNIPER;
         Session client(SessionMode::Client, cc);
         for (int i = 0; i < 300 && client.State() == SessionState::Connecting; i++) Pump(host, &client, DT);
         CHECK(client.State() == SessionState::Playing && client.Local(), "the client connects: %s", client.StatusText().c_str());
@@ -345,6 +406,8 @@ int main() {
         bool named = false;
         for (const ScoreRow& r : client.Scoreboard()) if (r.name == "Host") named = true;
         CHECK(named, "names arrive with the roster");
+        bool sniper = !host.Others().empty() && host.Others()[0].weapon == WEAPON_SNIPER;
+        CHECK(sniper && client.Local() && client.Local()->PrimaryWeapon() == WEAPON_SNIPER, "the guest plays the class they picked");
 
         // The client walks: predicted locally at once, and the host agrees
         if (client.Local()) {

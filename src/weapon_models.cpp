@@ -63,6 +63,7 @@ static const MaterialLook LOOKS[] = {
     { "parkerized", {  92,  92,  96, 255 }, 1.0f, 1.85f, true,  0, false, 1.0f },  // the FAL's dull phosphate finish
     { "falwood",    { 255, 255, 255, 255 }, 0.0f, 1.00f, true,  2, false, 1.0f },  // the FAL's furniture
     { "copper",     { 222, 140, 100, 255 }, 1.0f, 1.00f, true,  0, false, 1.0f },  // bullet jackets
+    { "glass",      {  60,  80, 105, 255 }, 1.0f, 0.12f, false, 0, false, 1.0f },  // telescope lenses: a dark, blue-tinted mirror
 };
 static const int LOOK_COUNT = sizeof(LOOKS) / sizeof(LOOKS[0]);
 
@@ -75,13 +76,15 @@ struct GunAsset {
     std::map<std::string, float> values;      // "key v" lines
 };
 
-static GunAsset revolver, fal;
+static GunAsset revolver, fal, l42;
 static Texture2D steelAlbedo{}, steelRough{}, woodAlbedo{}, woodRough{}, woodNormal{}, falWoodAlbedo{}, falWoodRough{};
 static RevolverRig rig;
 static FalRig falRig;
+static SniperRig sniperRig;
 
 const RevolverRig& GetRevolverRig() { return rig; }
 const FalRig& GetFalRig() { return falRig; }
+const SniperRig& GetSniperRig() { return sniperRig; }
 
 static Texture2D LoadTex(const std::string& path) {
     Texture2D t = LoadTexture(path.c_str());
@@ -204,17 +207,43 @@ bool LoadWeaponModelAssets(const char* assetDir) {
     } else {
         TraceLog(LOG_WARNING, "WEAPONS: FAL model missing from %s, using a placeholder", fdir.c_str());
     }
-    return revolver.loaded && fal.loaded;
+    std::string ldir = std::string(assetDir) + "models/l42/";
+    if (LoadGun(l42, ldir + "l42.glb", ldir + "l42.txt", { "receiver", "bolt", "trigger", "mag" })) {
+        SniperRig& r = sniperRig;
+        r.muzzle = Point(l42, "muzzle", r.muzzle);
+        r.frontSight = Point(l42, "front_sight", r.frontSight);
+        r.rearSight = Point(l42, "rear_sight", r.rearSight);
+        r.ejectionPort = Point(l42, "ejection_port", r.ejectionPort);
+        r.chamber = Point(l42, "chamber", r.chamber);
+        r.boltAxis = Point(l42, "bolt_axis", r.boltAxis);
+        r.boltKnob = Point(l42, "bolt_knob", r.boltKnob);
+        r.magTop = Point(l42, "mag_top", r.magTop);
+        r.magCentre = Point(l42, "mag_centre", r.magCentre);
+        r.triggerPivot = Point(l42, "trigger_pivot", r.triggerPivot);
+        r.handGrip = Point(l42, "hand_grip", r.handGrip);
+        r.handguard = Point(l42, "handguard", r.handguard);
+        r.boltTravel = Value(l42, "bolt_travel", r.boltTravel);
+        r.boltLiftDegrees = Value(l42, "bolt_lift", r.boltLiftDegrees);
+        SNIPER_MODELS.frontSightTop = r.frontSight;
+        SNIPER_MODELS.rearNotch = r.rearSight;
+        SNIPER_MODELS.handGrip = r.handGrip;
+        SNIPER_MODELS.fpMuzzle = r.muzzle;
+        SNIPER_MODELS.worldMuzzle = r.muzzle;
+        TraceLog(LOG_INFO, "WEAPONS: L42A1 loaded (%d meshes)", l42.model.meshCount);
+    } else {
+        TraceLog(LOG_WARNING, "WEAPONS: L42A1 model missing from %s, using a placeholder", ldir.c_str());
+    }
+    return revolver.loaded && fal.loaded && l42.loaded;
 }
 
 void SetWeaponModelShader(Shader shader) {
-    for (GunAsset* g : { &revolver, &fal })
+    for (GunAsset* g : { &revolver, &fal, &l42 })
         if (g->loaded)
             for (int i = 0; i < g->model.materialCount; i++) g->model.materials[i].shader = shader;
 }
 
 void UnloadWeaponModelAssets() {
-    for (GunAsset* g : { &revolver, &fal }) {
+    for (GunAsset* g : { &revolver, &fal, &l42 }) {
         if (!g->loaded) continue;
         // The textures are shared between materials: free them once, below
         for (int i = 0; i < g->model.materialCount; i++)
@@ -435,6 +464,53 @@ Matrix FalMagazineRock(float degrees, float drop) {
     return MatrixMultiply(AboutPoint(falRig.magPivot, MatrixRotateX(degrees * DEG2RAD)), MatrixTranslate(0, -drop, 0));
 }
 
+// --- The L42A1 ---------------------------------------------------------------------------
+
+enum SniperPart { SP_RECEIVER, SP_BOLT, SP_TRIGGER, SP_MAG };
+
+Matrix SniperBoltTransform(float lift, float back) {
+    Matrix turn = AboutPoint(sniperRig.boltAxis, MatrixRotateZ(lift * sniperRig.boltLiftDegrees * DEG2RAD));
+    return MatrixMultiply(turn, MatrixTranslate(0, 0, back * sniperRig.boltTravel));   // back = toward the shooter
+}
+
+Vector3 SniperKnob(float lift, float back) { return Vector3Transform(sniperRig.boltKnob, SniperBoltTransform(lift, back)); }
+
+// The magazine on its own (gun space at its seated position, then `transform`)
+static void DrawSniperMagazine(Matrix transform, bool loaded) {
+    if (!l42.loaded) {
+        rlPushMatrix();
+            rlMultMatrixf(MatrixToFloat(transform));
+            DrawCubeV(sniperRig.magCentre, { 0.024f, 0.07f, 0.07f }, DARKGRAY);
+        rlPopMatrix();
+        return;
+    }
+    DrawGunPart(l42, SP_MAG, transform);
+    if (loaded) {
+        // The top round, held in the lips, pointing up the gun
+        Vector3 t = sniperRig.magTop;
+        Matrix round = MatrixMultiply(MatrixRotateX(-3.0f * DEG2RAD), MatrixTranslate(t.x + 0.003f, t.y - 0.002f, t.z + 0.028f));
+        DrawRifleCartridge(MatrixMultiply(round, transform), false);
+    }
+}
+
+void DrawSniper(const SniperPose& pose) {
+    if (!l42.loaded) {
+        DrawCubeV({ 0, 0.03f, -0.22f }, { 0.035f, 0.06f, 1.10f }, DARKGRAY);
+        DrawCubeV({ 0, 0.10f, 0.0f }, { 0.03f, 0.03f, 0.28f }, BLACK);
+        return;
+    }
+    DrawGunPart(l42, SP_RECEIVER, MatrixIdentity());
+    Matrix bolt = SniperBoltTransform(pose.boltLift, pose.boltBack);
+    DrawGunPart(l42, SP_BOLT, bolt);
+    if (pose.chambered) {
+        // A round riding on the bolt face, into the chamber as the bolt closes
+        Vector3 c = sniperRig.chamber;
+        DrawRifleCartridge(MatrixMultiply(MatrixTranslate(c.x, c.y, c.z), bolt), false);   // its rim on the bolt face
+    }
+    DrawGunPart(l42, SP_TRIGGER, AboutPoint(sniperRig.triggerPivot, MatrixRotateX(-pose.trigger * 12.0f * DEG2RAD)));
+    if (pose.magInGun) DrawSniperMagazine(pose.magTransform, pose.magLoaded);
+}
+
 void DrawDebris(Matrix transform, int kind) {
     switch (kind) {
         case DEBRIS_REVOLVER_ROUND: DrawCartridge(transform, false); break;
@@ -442,6 +518,11 @@ void DrawDebris(Matrix transform, int kind) {
         case DEBRIS_RIFLE_ROUND: DrawRifleCartridge(transform, false); break;
         case DEBRIS_RIFLE_CASE: DrawRifleCartridge(transform, true); break;
         case DEBRIS_HELMET: DrawHelmet(transform); break;
+        case DEBRIS_SNIPER_MAG: {
+            Vector3 c = sniperRig.magCentre;
+            DrawSniperMagazine(MatrixMultiply(MatrixTranslate(-c.x, -c.y, -c.z), transform), false);
+            break;
+        }
         case DEBRIS_RIFLE_MAG: {
             // A loose magazine's origin is its centre; the part is modelled in place under the gun
             Vector3 c = { 0.0f, -0.08f, -0.0765f };
@@ -459,6 +540,29 @@ static void DrawFalWorld(bool muzzleFlash) {
     DrawFal(atRest);
     Render::SurfaceObject(0.25f);
 }
+
+// The L42A1 at rest in someone's hands (other players)
+static void DrawSniperWorld(bool muzzleFlash) {
+    (void)muzzleFlash;
+    static const SniperPose atRest;
+    DrawSniper(atRest);
+    Render::SurfaceObject(0.25f);
+}
+
+WeaponModels SNIPER_MODELS = {
+    nullptr,                         // drawn by its own view (SniperView)
+    DrawSniperWorld,
+    1.0f,                            // life size
+    { 0.10f, -0.17f, -0.10f },       // hip offset (camera space): as the FAL, the support hand on the forend
+    -2.5f,                           // hip yaw
+    0.165f,                          // aim distance: the eye just behind the eyepiece
+    { 0.0f, 0.100f, -0.178f },       // the telescope's axis (gun space; refreshed from l42.txt)
+    { 0.0f, 0.100f, 0.112f },
+    { 0.0f, -0.030f, 0.036f },       // hand grip
+    { 0.0f, 0.040f, -0.800f },       // muzzle
+    1.0f,
+    { 0.0f, 0.040f, -0.800f },
+};
 
 WeaponModels FAL_MODELS = {
     nullptr,                         // drawn by the rifle's own view (RifleView)

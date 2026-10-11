@@ -75,6 +75,8 @@ public:
     // Zoom: 0 = normal view, 1 = fully zoomed (aiming down sights).
     // Mouse sensitivity scales with the field of view so aiming stays steady.
     void SetZoom(float amount);
+    void SetFovy(float fovy) { camera.fovy = fovy; }   // a telescope's own magnification
+    float BaseFovy() const { return baseFovy; }
 
 private:
     bool OverlapsXZ(Vector3 pos, const BoundingBox& b) const;

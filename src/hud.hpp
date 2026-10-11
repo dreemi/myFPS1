@@ -36,6 +36,8 @@ struct State {
     float spreadPx = 0.0f;        // crosshair gap from the spread cone
     float recoil = 0.0f;
     float aim = 0.0f;             // aiming down sights hides the crosshair
+    bool scoped = false;          // looking through a telescope: it fills the view
+    float scopeFade = 0.0f;       // black while the telescope comes to the eye (0..1)
     float hitMarker = 0.0f;       // seconds left
     bool hitKilled = false, hitHeadshot = false;
     float killBanner = 0.0f;      // seconds left on "ELIMINATED"
@@ -78,6 +80,7 @@ struct MenuFields {
     std::string port = "27015";
     int bots = 1;
     int map = 0;                  // MapId, for hosting and playing offline
+    int playerClass = 0;          // PlayerClass: the loadout
     int focus = -1;               // which text field has the keyboard
 };
 enum class MenuAction { None, Offline, Host, Join, Cancel, Quit, MapChanged };

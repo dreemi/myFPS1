@@ -9,7 +9,12 @@
 // ===========================================================================
 
 SimPlayer::SimPlayer(uint8_t id, const std::string& name, unsigned seed)
-    : id(id), name(name), rifle(FAL, seed * 2 + 1), revolver(REVOLVER, seed * 2 + 2) {}
+    : id(id), name(name), rifle(FAL, seed * 2 + 1), revolver(REVOLVER, seed * 2 + 2), seed(seed) {}
+
+void SimPlayer::SetClass(int c) {
+    playerClass = (uint8_t)(c == CLASS_SNIPER ? CLASS_SNIPER : CLASS_STANDARD);
+    rifle = Weapon(WeaponDefOf(PrimaryWeapon()), seed * 2 + 1);
+}
 
 PlayerInput InputFromCommand(const PlayerCommand& cmd) {
     PlayerInput in;
@@ -61,7 +66,11 @@ void SimPlayer::Step(const PlayerCommand& cmd, const World& world, std::vector<R
         if (gun.Step(dt, in, body.GetStance(), body.GetCamera(), &ray) && shots) shots->push_back(ray);
         if (gun.TakeDryFire() && dryFired) *dryFired = true;
     }
-    body.SetZoom(gun.GetAimAmount());
+    // The view zooms as the sights come up; a telescope jumps to its own magnification
+    const WeaponDef& def = gun.GetDef();
+    float aim = gun.GetAimAmount();
+    if (def.scopeFovy > 0.0f) body.SetFovy(gun.IsScoped() ? def.scopeFovy : Lerp(body.BaseFovy(), 62.0f, aim / def.scopeAt));
+    else body.SetZoom(aim);
 }
 
 void SimPlayer::Respawn(Vector3 feet, float yaw) {
@@ -92,7 +101,7 @@ SoldierView SimPlayer::View() const {
     v.fallDir = fallDir;
     v.hitFlash = hitFlash;
     v.hitReact = hitReact;
-    v.weapon = current;
+    v.weapon = CurrentWeapon();
     v.muzzleFlash = Current().IsMuzzleFlashing();
     v.reloading = Current().IsReloading();
     v.health = body.GetHealth();
@@ -224,13 +233,14 @@ bool GameSim::HelmetDeflects(bool& helmet, Vector3 facing, Vector3 head, Ray sho
     return true;
 }
 
-SimPlayer* GameSim::AddPlayer(const std::string& name) {
+SimPlayer* GameSim::AddPlayer(const std::string& name, int playerClass) {
     uint8_t id = NO_ID;
     for (uint8_t i = 0; i < MAX_PLAYERS && id == NO_ID; i++)
         if (!Find(i)) id = i;
     if (id == NO_ID) return nullptr;
     players.push_back(std::make_unique<SimPlayer>(id, name, seed + id * 31u));
     SimPlayer& p = *players.back();
+    p.SetClass(playerClass);
     RespawnPlayer(p);
     GameEvent e;
     e.type = EventType::Joined;
@@ -297,7 +307,7 @@ bool GameSim::Execute(SimPlayer& p, const PlayerCommand& cmd) {
     bool dry = false;
     p.viewTime = cmd.viewTime;
     p.Step(cmd, world, &shots, &dry);
-    for (const Ray& r : shots) ResolveShot(p, r, p.current, cmd.viewTime);
+    for (const Ray& r : shots) ResolveShot(p, r, p.CurrentWeapon(), cmd.viewTime);
     return dry;
 }
 
@@ -315,7 +325,7 @@ void GameSim::SwitchSpawn(uint8_t id) {
 }
 
 void GameSim::ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTime) {
-    const WeaponDef& def = weapon == WEAPON_RIFLE ? FAL : REVOLVER;
+    const WeaponDef& def = WeaponDefOf(weapon);
     // See the others where the shooter saw them (within reason)
     float t = Clamp(viewTime, time - maxRewind, time);
 
@@ -426,7 +436,7 @@ void GameSim::ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTim
         for (auto it = events.rbegin(); it != events.rend(); ++it)
             if (it->type == EventType::Shot && it->actor == shooter.id) { it->flags |= EVENT_KILLED; break; }
     }
-    if (kind == HitKind::Player || kind == HitKind::Bot) shooter.Gun(weapon).RegisterHit(killed, headshot);
+    if (kind == HitKind::Player || kind == HitKind::Bot) shooter.Gun(SlotOfWeapon(weapon)).RegisterHit(killed, headshot);
 }
 
 void GameSim::KillPlayer(SimPlayer& victim, uint8_t killer, int weapon, bool headshot, Vector3 from) {

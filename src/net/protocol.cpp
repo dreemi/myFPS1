@@ -73,6 +73,7 @@ std::vector<uint8_t> EncodeHello(const Hello& h) {
     w.U8(MSG_HELLO);
     w.U16(h.version);
     w.Str(h.name);
+    w.U8(h.playerClass);
     return w.data;
 }
 
@@ -81,6 +82,7 @@ bool DecodeHello(const std::vector<uint8_t>& msg, Hello& out) {
     if (r.U8() != MSG_HELLO) return false;
     out.version = r.U16();
     out.name = r.Str();
+    out.playerClass = r.U8() == CLASS_SNIPER ? CLASS_SNIPER : CLASS_STANDARD;
     return r.ok;
 }
 
@@ -182,13 +184,13 @@ bool DecodeInput(const std::vector<uint8_t>& msg, std::vector<PlayerCommand>& ou
 // --- Snapshot ---------------------------------------------------------------------------
 
 enum SoldierFlag : uint8_t {
-    SF_ALIVE = 1, SF_CROUCH = 2, SF_GROUNDED = 4, SF_RELOADING = 8, SF_MUZZLE = 16, SF_RIFLE = 32, SF_HELMET = 64,
+    SF_ALIVE = 1, SF_CROUCH = 2, SF_GROUNDED = 4, SF_RELOADING = 8, SF_MUZZLE = 16, SF_RIFLE = 32, SF_HELMET = 64, SF_SNIPER = 128,
 };
 
 static void WriteSoldier(Writer& w, const SoldierView& v) {
     uint8_t f = (v.alive ? SF_ALIVE : 0) | (v.crouching ? SF_CROUCH : 0) | (v.grounded ? SF_GROUNDED : 0) |
                 (v.reloading ? SF_RELOADING : 0) | (v.muzzleFlash ? SF_MUZZLE : 0) | (v.weapon == WEAPON_RIFLE ? SF_RIFLE : 0) |
-                (v.helmet ? SF_HELMET : 0);
+                (v.helmet ? SF_HELMET : 0) | (v.weapon == WEAPON_SNIPER ? SF_SNIPER : 0);
     w.U8(v.id);
     w.U8(f);
     w.Vec3(v.feet);
@@ -214,7 +216,7 @@ static SoldierView ReadSoldier(Reader& r, bool bot) {
     v.grounded = f & SF_GROUNDED;
     v.reloading = f & SF_RELOADING;
     v.muzzleFlash = f & SF_MUZZLE;
-    v.weapon = (f & SF_RIFLE) ? WEAPON_RIFLE : WEAPON_REVOLVER;
+    v.weapon = (f & SF_SNIPER) ? WEAPON_SNIPER : ((f & SF_RIFLE) ? WEAPON_RIFLE : WEAPON_REVOLVER);
     v.helmet = f & SF_HELMET;
     v.feet = r.Vec3();
     v.yaw = r.Angle();
@@ -384,7 +386,8 @@ bool DecodeEvents(const std::vector<uint8_t>& msg, std::vector<GameEvent>& out) 
         e.type = (EventType)type;
         e.actor = r.U8();
         e.target = r.U8();
-        e.weapon = r.U8() == WEAPON_REVOLVER ? WEAPON_REVOLVER : WEAPON_RIFLE;
+        uint8_t weapon = r.U8();
+        e.weapon = weapon == WEAPON_REVOLVER || weapon == WEAPON_SNIPER ? weapon : WEAPON_RIFLE;
         uint8_t hit = r.U8();
         e.hit = hit <= (uint8_t)HitKind::Bot ? (HitKind)hit : HitKind::None;
         e.flags = r.U8();

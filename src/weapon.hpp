@@ -26,6 +26,9 @@ struct WeaponDef {
     bool automatic = false;       // keeps firing while the trigger is held
     float reloadEmptyTime = 0.0f; // reload from empty (has to be charged), if longer than reloadTime
     float bloomPerShot = 0.0f;    // degrees each shot adds to the spread (sustained fire walks off)
+    bool boltAction = false;      // the bolt is worked after every shot (fireCooldown): off the sights meanwhile
+    float scopeFovy = 0.0f;       // aimed through a telescope: the view's field of view (0 = iron sights)
+    float scopeAt = 0.85f;        // ...from this far into raising it to the eye
 
     float HipSpread(Stance stance) const;
 };
@@ -33,6 +36,8 @@ struct WeaponDef {
 // Enemies have 100 health.
 extern const WeaponDef REVOLVER; // 4 body shots or 2 headshots
 extern const WeaponDef FAL;      // 3 body shots or 1 headshot, automatic
+extern const WeaponDef L42A1;    // 1 shot, bolt action, telescope
+const WeaponDef& WeaponDefOf(int weapon); // WEAPON_RIFLE, WEAPON_REVOLVER or WEAPON_SNIPER
 
 // What one shot hit (for effects and sounds; damage is already applied)
 struct ShotResult {
@@ -101,6 +106,9 @@ public:
     // Aiming down sights: eases toward 1 while held (not while reloading)
     void UpdateAim(float dt, bool wantAim);
     float GetAimAmount() const { return aimAmount; } // 0 = hip, 1 = fully aimed
+    bool IsScoped() const { return def->scopeFovy > 0.0f && aimAmount >= def->scopeAt; } // looking through the telescope
+    // Bolt action: seconds since the last shot while the bolt is still being worked (-1 otherwise)
+    float BoltCycleTime() const { return def->boltAction && cooldownTimer > 0.0f ? def->fireCooldown - cooldownTimer : -1.0f; }
 
     const WeaponDef& GetDef() const { return *def; }
     int GetAmmo() const { return ammo; }
@@ -138,4 +146,5 @@ private:
 
     ShotResult lastShot;
     bool dryFire = false;
+    bool reloadQueued = false;   // asked for while the bolt was being worked
 };

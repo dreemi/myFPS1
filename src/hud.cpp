@@ -392,11 +392,11 @@ static bool Field(Rectangle r, std::string& value, int id, int& focus, size_t ma
 MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& st) {
     DrawRectangleGradientV(0, 0, screenW, screenH, { 6, 8, 12, 140 }, { 6, 8, 12, 235 });
     float cx = screenW / 2.0f;
-    Text("DUSTYARD", cx, 40, 80, TEXT, CENTER);
-    DrawRectangle((int)cx - 150, 126, 300, 3, ACCENT);
+    Text("DUSTYARD", cx, 22, 80, TEXT, CENTER);
+    DrawRectangle((int)cx - 150, 106, 300, 3, ACCENT);
 
     MenuAction action = MenuAction::None;
-    Rectangle panel = { cx - 330, 146, 660, 486 };
+    Rectangle panel = { cx - 330, 120, 660, 538 };
     DrawRectangleRounded(panel, 0.04f, 8, { 10, 12, 14, 190 });
     float lx = panel.x + 150;   // fields start here (labels to their left)
 
@@ -412,7 +412,7 @@ MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& s
     // The map (for hosting and offline; joining plays the host's)
     static const char* BLURBS[] = { "Woods, farmland flanks and a stone fort in the middle. Big: 240 m.",
                                     "A sun-baked town: three lanes and a plaza. Small and quick.",
-                                    "Scanned old houses round a king-of-the-hill plaza. 160 m." };
+                                    "Scanned old houses, narrow alleys, a king-of-the-hill square. 113 m." };
     const int maps = (int)MapId::Count;
     Text("MAP", lx - 14, panel.y + 87, 18, DIM, RIGHT);
     if (Button({ lx, panel.y + 78, 38, 38 }, "<")) { f.map = (f.map + maps - 1) % maps; action = MenuAction::MapChanged; }
@@ -420,9 +420,18 @@ MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& s
     if (Button({ lx + 184, panel.y + 78, 38, 38 }, ">")) { f.map = (f.map + 1) % maps; action = MenuAction::MapChanged; }
     Text(BLURBS[f.map % (int)MapId::Count], lx, panel.y + 119, 14, DIM);
 
+    // The class: the loadout you play with
+    static const char* CLASS_BLURBS[] = { "FAL automatic rifle, and the revolver.",
+                                          "L42A1 bolt-action rifle with a telescope, and the revolver." };
+    Text("CLASS", lx - 14, panel.y + 149, 18, DIM, RIGHT);
+    if (Button({ lx, panel.y + 140, 38, 38 }, "<")) f.playerClass = (f.playerClass + CLASS_COUNT - 1) % CLASS_COUNT;
+    Text(ClassName(f.playerClass), lx + 111, panel.y + 147, 24, TEXT, CENTER);
+    if (Button({ lx + 184, panel.y + 140, 38, 38 }, ">")) f.playerClass = (f.playerClass + 1) % CLASS_COUNT;
+    Text(CLASS_BLURBS[f.playerClass % CLASS_COUNT], lx, panel.y + 181, 14, DIM);
+
     // Play alone
     if (Button({ panel.x + 430, panel.y + 20, 200, 46 }, "PLAY OFFLINE")) action = MenuAction::Offline;
-    const float o = 52.0f;
+    const float o = 114.0f;
     DrawRectangle((int)panel.x + 24, (int)(panel.y + 86 + o), (int)panel.width - 48, 1, { 255, 255, 255, 30 });
 
     // Host: friends join you
@@ -472,7 +481,30 @@ static void DeathScreen(const State& s) {
     DrawRectangleRec({ cx - 120, cy + 52, 240 * frac, 6 }, TEXT);
 }
 
+// The telescope (No. 32 pattern): a round field of view in black, a pointed post rising
+// to the centre and a thick bar from each side stopping short of it
+static void Scope(const State& s) {
+    if (s.scoped && s.alive) {
+        float cx = s.screenW / 2.0f, cy = s.screenH / 2.0f;
+        float R = s.screenH * 0.47f;
+        float outer = sqrtf((float)(s.screenW * s.screenW + s.screenH * s.screenH)) * 0.5f + 4.0f;
+        DrawCircleV({ cx, cy }, R, { 40, 70, 90, 18 });                 // the glass: a faint cool tint
+        for (int i = 0; i < 10; i++)                                      // the tube's dark edge
+            DrawRing({ cx, cy }, R - 34.0f + i * 3.4f, R, 0, 360, 128, { 0, 0, 0, 22 });
+        DrawRing({ cx, cy }, R, outer, 0, 360, 128, BLACK);
+        const Color ink = { 6, 6, 6, 255 };
+        float gap = R * 0.10f, bar = 4.0f;
+        DrawRectangleRec({ cx - R, cy - bar / 2, R - gap, bar }, ink);    // the side bars
+        DrawRectangleRec({ cx + gap, cy - bar / 2, R - gap, bar }, ink);
+        float post = 7.0f;                                                // the post, pointed at the aim
+        DrawRectangleRec({ cx - post / 2, cy + 14.0f, post, R }, ink);
+        DrawTriangle({ cx, cy }, { cx - post / 2, cy + 14.0f }, { cx + post / 2, cy + 14.0f }, ink);
+    }
+    if (s.scopeFade > 0.0f) DrawRectangle(0, 0, s.screenW, s.screenH, A(BLACK, s.scopeFade));
+}
+
 void Draw(const State& s) {
+    Scope(s);
     if (vignette.id)
         DrawTexturePro(vignette, { 0, 0, (float)vignette.width, (float)vignette.height }, { 0, 0, (float)s.screenW, (float)s.screenH },
                        { 0, 0 }, 0, WHITE);

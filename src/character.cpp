@@ -5,7 +5,7 @@
 #include <cstring>
 
 static const char* ANIM_NAMES[(int)CharAnim::Count] = { "idle", "walk", "run", "crouch", "crouch_walk", "fp_hold", "rest",
-                                                         "fp_rifle" };
+                                                         "fp_rifle", "fp_sniper" };
 
 bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
     std::string dir = assetDir + "models/character/";
@@ -42,10 +42,15 @@ bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
                 c.fpGrip = v;
             } else if (sscanf(line, "fp_rifle_grip %f %f %f", &v.x, &v.y, &v.z) == 3) {
                 c.fpRifleGrip = v;
+            } else if (sscanf(line, "fp_sniper_grip %f %f %f", &v.x, &v.y, &v.z) == 3) {
+                c.fpSniperGrip = v;
             } else {
-                bool rifle = sscanf(line, "fp_rifle_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4;
-                if (rifle || sscanf(line, "fp_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4) {
-                    std::vector<Vector3>& track = c.leftPalm[(int)(rifle ? CharAnim::FpRifle : CharAnim::FpHold)];
+                CharAnim anim = CharAnim::Count;
+                if (sscanf(line, "fp_rifle_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4) anim = CharAnim::FpRifle;
+                else if (sscanf(line, "fp_sniper_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4) anim = CharAnim::FpSniper;
+                else if (sscanf(line, "fp_left %d %f %f %f", &index, &v.x, &v.y, &v.z) == 4) anim = CharAnim::FpHold;
+                if (anim != CharAnim::Count) {
+                    std::vector<Vector3>& track = c.leftPalm[(int)anim];
                     if (index >= 0 && index < 1000) {
                         if ((int)track.size() <= index) track.resize(index + 1, v);
                         track[index] = v;
@@ -142,11 +147,12 @@ Vector3 CharacterGripPoint(const CharacterAssets& c, CharAnim anim, int frame) {
     if (!c.loaded) return c.aimGrip;
     // The exported grip point is for the first frame of the hold poses; other
     // frames move the hand (walk bob, reload) - follow the hand bone.
-    bool fp = anim == CharAnim::FpHold || anim == CharAnim::FpRifle;
+    bool fp = anim == CharAnim::FpHold || anim == CharAnim::FpRifle || anim == CharAnim::FpSniper;
     const ModelAnimation& ref = c.anims[c.animIndex[(int)(fp ? anim : CharAnim::Idle)]];
     const ModelAnimation& cur = c.anims[c.animIndex[(int)anim]];
     frame = Clamp(frame, 0, cur.frameCount - 1);
     Vector3 delta = Vector3Subtract(cur.framePoses[frame][c.handBone].translation, ref.framePoses[0][c.handBone].translation);
-    Vector3 base = anim == CharAnim::FpHold ? c.fpGrip : (anim == CharAnim::FpRifle ? c.fpRifleGrip : c.aimGrip);
+    Vector3 base = anim == CharAnim::FpHold ? c.fpGrip : (anim == CharAnim::FpRifle ? c.fpRifleGrip :
+                   (anim == CharAnim::FpSniper ? c.fpSniperGrip : c.aimGrip));
     return Vector3Add(base, delta);
 }

@@ -1,6 +1,6 @@
 # Dustyard
 
-A raylib (C++) FPS: an FN FAL and a revolver, AI opponents, and three maps: **Redoubt**, a long woodland battlefield with a stone fort in the middle; **Old Town**, an old quarter built from photogrammetry scans round a King of the Hill plaza; and **Dustyard**, a small sun-baked town. Play offline, or host a game for up to 8 players over LAN or the internet.
+A raylib (C++) FPS: two classes (an FN FAL, or an L42A1 sniper rifle with a telescope, each with a revolver), AI opponents, and three maps: **Redoubt**, a long woodland battlefield with a stone fort in the middle; **Old Town**, an old quarter built from photogrammetry scans round a King of the Hill plaza; and **Dustyard**, a small sun-baked town. Play offline, or host a game for up to 8 players over LAN or the internet.
 
 ## Build
 
@@ -11,7 +11,7 @@ Run `build/fps.exe` (assets are copied next to it on every build). CMake downloa
 
 ## Playing
 
-The main menu has three choices, and a **map** picker (it applies to playing offline and hosting; joining plays the host's map):
+The main menu has three choices, a **map** picker (it applies to playing offline and hosting; joining plays the host's map) and a **class** picker (see Classes):
 
 - **Play Offline**: you and the bots, nothing on the network.
 - **Host Game**: starts a game on this PC that you play in. Friends join it. Pick the UDP port (default **27015**) and the number of bots (0–6). While hosting, the top-left corner shows the port and this PC's LAN addresses.
@@ -23,9 +23,16 @@ From the command line:
 
     fps.exe --host [port] --bots 2 --name Ann --map redoubt
     fps.exe --join 192.168.1.20:27015 --name Bob
-    fps.exe --offline --map oldtown
+    fps.exe --offline --map oldtown --class sniper
 
-The name, address, port, bots and map you last used are saved in `dustyard.cfg` next to the exe.
+The name, address, port, bots, map and class you last used are saved in `dustyard.cfg` next to the exe.
+
+## Classes
+
+Pick one in the main menu before you play. Both carry the revolver as a sidearm.
+
+- **Standard**: the FN FAL, automatic, 20 rounds. Three body shots or one to the head.
+- **Sniper**: the Enfield L42A1, a bolt-action 7.62 rifle with a 10-round magazine and a telescope. One shot kills. Aimed all the way, you look through the telescope (about four times magnification, a pointed post and side bars). After each shot your eye comes off it while you work the bolt (about a second: handle up, back, the case flies out, forward, down). From the hip it's wild. The reload opens the bolt, changes the magazine and closes the bolt again.
 
 ## Maps
 
@@ -39,12 +46,13 @@ Long and wide: team A spawns in a log palisade at one end, team B at the other, 
 - **The houses**: a two-storey stone house for each team near the middle, with doors toward the woods and the fort, windows on both floors, and stairs inside.
 - **The lookout towers**: a stair tower in each team's back corner. The stairs wind up inside a closed log shaft, so you're safe on the way up, to an open lookout 15 m up, above the treetops. From there you can see the other tower across the whole map and straight down the tree-free lane along your edge of the map. It's far from the action, but safe.
 
-### Old Town (161 × 54 m)
+### Old Town (113 × 41 m)
 
 A walled-in old quarter built entirely from photogrammetry scans of real buildings (`assets/models/scans`), round a **King of the Hill** plaza. Team A spawns in a yard in one corner and team B in the opposite one; both halves are the same, turned half a circle.
 
 - **The hill**: a paved circle in the middle, marked by a low stone kerb, with a fountain basin and a plinth for cover. Standing in it **alone** scores a second of hill time for every second; two or more in it and it's contested, so nobody scores. A banner at the top of the screen says who holds it, and the scoreboard ranks everyone by time on the hill.
-- **The streets**: rows of old houses all round the edge, an L-shaped block of houses on each side, a storage building flanking the plaza, a damaged plaster house standing out of each long row, a junk-filled nook in a ruined room, and a ruined wall out in the open.
+- **The streets**: alleys about 4 m wall to wall between rows of old houses all round the edge, an L-shaped block of houses on each side, and a storage building; only the square round the hill opens up, closed in by a damaged plaster house standing out of each long row. A junk-filled nook in a ruined room, and a ruined wall in a little yard.
+- **Sidewalks**: every building stands on the paving with a raised sidewalk round it (16 cm, stepped onto).
 - The buildings are shells with no insides; invisible boxes stop people and bullets.
 
 ### Dustyard (40 × 80 m)
@@ -72,9 +80,9 @@ Everyone, players and bots, wears a steel helmet. A shot to the **back** of the 
 | Key | Action |
 |---|---|
 | WASD | Move (Shift sprint, Ctrl or C crouch, Space jump) |
-| Mouse | Look; left click fire (hold for automatic with the FAL), right click aim down sights |
+| Mouse | Look; left click fire (hold for automatic with the FAL), right click aim down sights (or through the L42A1's telescope) |
 | R | Reload |
-| 1 / 2 / mouse wheel | Switch between the FAL and the revolver |
+| 1 / 2 / mouse wheel | Switch between your rifle and the revolver |
 | Q / E | Lean |
 | Tab (hold) | Scoreboard (players and bots) |
 | Esc | Pause menu (resume, leave game, quit) |
@@ -106,10 +114,14 @@ Everyone, players and bots, wears a steel helmet. A shot to the **back** of the 
 - `src/effects.*`: particles, decals, tracers, muzzle flashes
 - `src/hud.*`: HUD, main menu, scoreboard, nameplates, kill feed
 - `src/audio.*`: sound playback and synthesized effects
-- `src/viewmodel.*`, `src/rifle_view.*`: first-person weapons (shared motion and arms, the revolver, the FAL)
+- `src/viewmodel.*`, `src/rifle_view.*`, `src/sniper_view.*`: first-person weapons (shared motion and arms, the revolver, the FAL, the L42A1)
 - `src/player.*`, `weapon.*`, `enemy.*`, `weapon_models.*`, `character.*`: gameplay and models
 - `tests/`: headless tests. `net_test` runs a real host and client over loopback. `player_test` checks both maps: Redoubt is symmetric, everything is reachable on foot, and a simulated player climbs the tower and the house stairs.
 - `tools/make_textures.py`: generates the textures (run with Blender's Python).
 - `tools/scan_facade.py`, `scan_object.py`, `scan_repack.py`, `scan_colliders.py`: turn photogrammetry scans into game models (see `assets/models/scans/README.md`).
 
 For performance checks, `fps.exe --offline --map redoubt --bots 4 --bench` prints the average and worst frame time over 300 frames with vsync off.
+
+To check animations without playing, a scripted run takes screenshots (`demo_N.png`) at the given seconds and quits; it doesn't touch your saved settings:
+
+    fps.exe --offline --class sniper --demo-aim 1 2.5 --demo-fire 2.2 --demo-reload 4 --shots 2.6,2.9,4.5,6

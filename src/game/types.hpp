@@ -11,7 +11,19 @@ constexpr int MAX_PLAYERS = 8;
 constexpr uint8_t NO_ID = 255;
 constexpr uint8_t BOT_ID_BASE = 100;   // ids from here up are bots (BOT_ID_BASE + index)
 inline std::string BotName(uint8_t id) { return "RIVAL " + std::to_string(id - BOT_ID_BASE + 1); }
-constexpr int WEAPON_RIFLE = 0, WEAPON_REVOLVER = 1;
+// Weapon slots (what a command asks to hold) are WEAPON_RIFLE (the primary) and
+// WEAPON_REVOLVER (the secondary). What's in the primary slot depends on the player's class;
+// views and events name the actual weapon: WEAPON_RIFLE (the FAL), WEAPON_REVOLVER or WEAPON_SNIPER.
+constexpr int WEAPON_RIFLE = 0, WEAPON_REVOLVER = 1, WEAPON_SNIPER = 2;
+inline int SlotOfWeapon(int weapon) { return weapon == WEAPON_REVOLVER ? WEAPON_REVOLVER : WEAPON_RIFLE; }
+inline const char* WeaponName(int weapon) {
+    return weapon == WEAPON_SNIPER ? "L42A1" : (weapon == WEAPON_REVOLVER ? "REVOLVER" : "FAL");
+}
+
+// Classes: the loadout picked before joining a game
+enum PlayerClass : uint8_t { CLASS_STANDARD = 0, CLASS_SNIPER = 1, CLASS_COUNT };
+inline const char* ClassName(int c) { return c == CLASS_SNIPER ? "SNIPER" : "STANDARD"; }
+inline int PrimaryOfClass(int c) { return c == CLASS_SNIPER ? WEAPON_SNIPER : WEAPON_RIFLE; }
 
 // One frame of a player's intent, as sent from a client to the host
 enum CommandButton : uint16_t {

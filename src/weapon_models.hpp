@@ -87,8 +87,39 @@ void DrawFal(const FalPose& pose);
 Matrix FalMagazineRock(float degrees, float drop); // magazine rocked about its front hook (+ forward), dropped down
 void DrawRifleCartridge(Matrix transform, bool fired);
 
+// The Enfield L42A1 (assets/models/l42, made by tools/make_l42.py): a bolt action with a telescope
+struct SniperPose {
+    float boltLift = 0.0f;   // 0 = handle down (locked), 1 = turned up
+    float boltBack = 0.0f;   // 0 = closed, 1 = drawn fully back
+    float trigger = 0.0f;
+    bool magInGun = true;    // drawn at magTransform (gun space; identity = seated)
+    Matrix magTransform = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    bool magLoaded = true;   // the top round shows in the open action
+    bool chambered = false;  // a round on the bolt face (drawn while the bolt is back and coming forward)
+};
+struct SniperRig {
+    Vector3 muzzle = { 0.0f, 0.040f, -0.800f };
+    Vector3 frontSight = { 0.0f, 0.100f, -0.178f };   // the telescope's axis: objective...
+    Vector3 rearSight = { 0.0f, 0.100f, 0.112f };     // ...and eyepiece
+    Vector3 ejectionPort = { 0.012f, 0.050f, -0.080f };
+    Vector3 chamber = { 0.0f, 0.040f, -0.128f };
+    Vector3 boltAxis = { 0.0f, 0.040f, 0.0f };         // a point on the bore axis the bolt turns about
+    Vector3 boltKnob = { 0.048f, 0.018f, 0.010f };     // the knob's centre, bolt closed
+    Vector3 magTop = { 0.0f, 0.016f, -0.082f };
+    Vector3 magCentre = { 0.0f, -0.021f, -0.082f };
+    Vector3 triggerPivot = { 0.0f, 0.0f, -0.032f };
+    Vector3 handGrip = { 0.0f, -0.030f, 0.036f };
+    Vector3 handguard = { 0.0f, 0.004f, -0.300f };
+    float boltTravel = 0.095f, boltLiftDegrees = 62.0f;
+};
+const SniperRig& GetSniperRig();
+void DrawSniper(const SniperPose& pose);
+Matrix SniperBoltTransform(float lift, float back);   // gun space: turned up about the bore, then drawn back
+Vector3 SniperKnob(float lift, float back);           // where the bolt knob is (gun space)
+
 // Anything that falls out of a gun and lands in the world
-enum DebrisKind { DEBRIS_REVOLVER_ROUND, DEBRIS_REVOLVER_CASE, DEBRIS_RIFLE_ROUND, DEBRIS_RIFLE_CASE, DEBRIS_RIFLE_MAG, DEBRIS_HELMET };
+enum DebrisKind { DEBRIS_REVOLVER_ROUND, DEBRIS_REVOLVER_CASE, DEBRIS_RIFLE_ROUND, DEBRIS_RIFLE_CASE, DEBRIS_RIFLE_MAG, DEBRIS_HELMET,
+                  DEBRIS_SNIPER_MAG };
 void DrawDebris(Matrix transform, int kind); // cartridges: origin at the rim face, bullet along -Z; magazines: origin at the centre
 
 // What the first-person model needs besides the gun's own parts
@@ -126,6 +157,8 @@ struct WeaponModels {
 extern WeaponModels REVOLVER_MODELS;
 // The FAL's first-person placement (drawn by RifleView). Points refresh from fal.txt.
 extern WeaponModels FAL_MODELS;
+// The L42A1's (drawn by SniperView). Points refresh from l42.txt.
+extern WeaponModels SNIPER_MODELS;
 
 // Load/unload the weapon meshes and textures (after InitWindow). Without them
 // the weapons draw as a plain placeholder box.

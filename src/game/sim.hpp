@@ -21,8 +21,9 @@ struct SimPlayer {
     uint8_t id;
     std::string name;
     Player body;
-    Weapon rifle, revolver;
-    int current = WEAPON_RIFLE, wanted = WEAPON_RIFLE; // in hand, and asked for (switching while they differ)
+    Weapon rifle, revolver;    // the primary (the class's: the FAL or the L42A1) and the revolver
+    int current = WEAPON_RIFLE, wanted = WEAPON_RIFLE; // slot in hand, and asked for (switching while they differ)
+    uint8_t playerClass = CLASS_STANDARD;
     float holster = 0.0f;      // 0 = up, 1 = lowered out of sight (switching)
     int kills = 0, deaths = 0;
     float respawnTimer = 0.0f; // while dead
@@ -33,6 +34,7 @@ struct SimPlayer {
     bool helmet = true;        // stops one shot to the back of the head
     float hillTime = 0.0f;     // seconds alone on the hill
     int ping = 0;
+    unsigned seed;
 
     // Host bookkeeping for a remote player's commands
     uint32_t lastSeq = 0;      // last command applied
@@ -45,6 +47,9 @@ struct SimPlayer {
     Weapon& Current() { return Gun(current); }
     const Weapon& Current() const { return Gun(current); }
     bool Alive() const { return body.IsAlive(); }
+    void SetClass(int c);      // its primary weapon changes to the class's (full, at the hip)
+    int PrimaryWeapon() const { return PrimaryOfClass(playerClass); }
+    int CurrentWeapon() const { return current == WEAPON_RIFLE ? PrimaryWeapon() : WEAPON_REVOLVER; } // what's in hand
 
     // One command: look, move, switch weapons, aim, reload, fire. Rays of shots
     // fired are appended to `shots`; `dryFired` says the trigger clicked on empty.
@@ -61,7 +66,7 @@ public:
     GameSim(const World& world, int bots, unsigned seed);
 
     // Players: ids 0..MAX_PLAYERS-1. AddPlayer returns null when the game is full.
-    SimPlayer* AddPlayer(const std::string& name);
+    SimPlayer* AddPlayer(const std::string& name, int playerClass = CLASS_STANDARD);
     void RemovePlayer(uint8_t id);
     SimPlayer* Find(uint8_t id);
     const SimPlayer* Find(uint8_t id) const;
@@ -105,7 +110,7 @@ private:
     };
 
     bool Execute(SimPlayer& p, const PlayerCommand& cmd); // true: dry fire
-    void ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTime);
+    void ResolveShot(SimPlayer& shooter, Ray ray, int weapon, float viewTime); // weapon: WEAPON_RIFLE/REVOLVER/SNIPER
     void UpdateBots(float dt);
     void ResolveBotShot(int shooter, Ray shot);
     // A head hit from behind on a helmet: it pops off and the shot does nothing (true)

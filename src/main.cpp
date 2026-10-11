@@ -6,6 +6,7 @@
 #include "weapon.hpp"
 #include "viewmodel.hpp"
 #include "rifle_view.hpp"
+#include "sniper_view.hpp"
 #include "world.hpp"
 #include "enemy.hpp"
 #include "materials.hpp"
@@ -39,6 +40,7 @@ static void LoadSettings(Hud::MenuFields& f) {
         else if (key == "address") f.address = value;
         else if (key == "port") f.port = value;
         else if (key == "bots") f.bots = std::clamp(atoi(value.c_str()), 0, 6);
+        else if (key == "class") f.playerClass = value == ClassName(CLASS_SNIPER) ? CLASS_SNIPER : CLASS_STANDARD;
         else if (key == "map") {
             for (int m = 0; m < (int)MapId::Count; m++)
                 if (value == MapName((MapId)m)) f.map = m;
@@ -53,7 +55,7 @@ static void SaveSettings(const Hud::MenuFields& f) {
         return s.empty() ? std::string("-") : s;
     };
     out << "name " << safe(f.name) << "\naddress " << safe(f.address) << "\nport " << safe(f.port) << "\nbots " << f.bots
-        << "\nmap " << MapName((MapId)f.map) << "\n";
+        << "\nmap " << MapName((MapId)f.map) << "\nclass " << ClassName(f.playerClass) << "\n";
 }
 
 // Presentation state that belongs to one session (reset when a new one starts)
@@ -77,17 +79,34 @@ struct Feel {
 
 int main(int argc, char** argv) {
     // Command line: --overview N (debug render), --host [port], --join address[:port],
-    // --offline, --name NAME, --bots N, --map redoubt|dustyard
+    // --offline, --name NAME, --bots N, --map redoubt|dustyard|oldtown, --class standard|sniper
     int overview = -1;
     bool bench = false;   // with --overview: time 300 frames without vsync instead of a screenshot
     Hud::MenuFields fields;
     LoadSettings(fields);
     int autoStart = -1; // a SessionMode to start straight away
+    // Debug: a scripted session (--demo-aim FROM TO, --demo-fire T, --demo-reload T) with
+    // screenshots at the given seconds (--shots T1,T2,...: demo_<n>.png), then quit
+    float demoAimFrom = -1.0f, demoAimTo = -1.0f;
+    std::vector<float> demoFire, demoReload, demoShots;
+    auto times = [](const char* list) {
+        std::vector<float> out;
+        for (const char* p = list; *p;) {
+            out.push_back((float)atof(p));
+            while (*p && *p != ',') p++;
+            if (*p) p++;
+        }
+        return out;
+    };
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         bool hasNext = i + 1 < argc && argv[i + 1][0] != '-';
         if (a == "--overview" && hasNext) overview = atoi(argv[++i]);
         else if (a == "--bench") bench = true;
+        else if (a == "--demo-aim" && i + 2 < argc) { demoAimFrom = (float)atof(argv[++i]); demoAimTo = (float)atof(argv[++i]); }
+        else if (a == "--demo-fire" && hasNext) demoFire = times(argv[++i]);
+        else if (a == "--demo-reload" && hasNext) demoReload = times(argv[++i]);
+        else if (a == "--shots" && hasNext) demoShots = times(argv[++i]);
         else if (a == "--host") { autoStart = (int)SessionMode::Host; if (hasNext) fields.port = argv[++i]; }
         else if (a == "--offline") autoStart = (int)SessionMode::Offline;
         else if (a == "--join" && hasNext) {
@@ -98,6 +117,11 @@ int main(int argc, char** argv) {
             fields.address = addr;
         } else if (a == "--name" && hasNext) fields.name = argv[++i];
         else if (a == "--bots" && hasNext) fields.bots = std::clamp(atoi(argv[++i]), 0, 6);
+        else if (a == "--class" && hasNext) {
+            std::string c = argv[++i];
+            for (char& ch : c) ch = (char)toupper(ch);
+            fields.playerClass = c == ClassName(CLASS_SNIPER) ? CLASS_SNIPER : CLASS_STANDARD;
+        }
         else if (a == "--map" && hasNext) {
             std::string name = argv[++i];
             for (char& c : name) c = (char)toupper(c);
@@ -146,7 +170,13 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<Session> session;
     std::unique_ptr<RifleView> rifleView;
+    std::unique_ptr<SniperView> sniperView;
     std::unique_ptr<ViewModel> revolverView;
+    // The first-person view of what's in the player's hand
+    auto viewOf = [&](const SimPlayer* p) -> WeaponView* {
+        if (p->current == WEAPON_REVOLVER) return revolverView.get();
+        return p->PrimaryWeapon() == WEAPON_SNIPER ? (WeaponView*)sniperView.get() : (WeaponView*)rifleView.get();
+    };
     Feel feel;
     Hud::MenuStatus menuStatus;
     bool paused = false;
@@ -166,13 +196,15 @@ int main(int argc, char** argv) {
         fields.port = std::to_string(cfg.port);
         cfg.bots = fields.bots;
         cfg.map = (MapId)fields.map;
-        SaveSettings(fields);
+        cfg.playerClass = fields.playerClass;
+        if (demoShots.empty()) SaveSettings(fields);   // a scripted demo leaves your settings alone
         session.reset();
         worldSerial++;
         session = std::make_unique<Session>(mode, cfg);
         rifleView = std::make_unique<RifleView>(FAL_MODELS);
+        sniperView = std::make_unique<SniperView>(SNIPER_MODELS);
         revolverView = std::make_unique<ViewModel>(REVOLVER_MODELS);
-        rifleView->arms = revolverView->arms = &character;
+        rifleView->arms = sniperView->arms = revolverView->arms = &character;
         feel = Feel{};
         Fx::Clear();
         paused = false;
@@ -197,8 +229,23 @@ int main(int argc, char** argv) {
     if (autoStart >= 0 && overview < 0) startSession((SessionMode)autoStart);
 
     bool inGame = false; // the cursor is captured while playing
+    int pendingShot = -1; // the demo's next screenshot, taken at the end of this frame
+    float demoClock = 0.0f, demoLast = 0.0f;
+    auto demoAt = [&](const std::vector<float>& list) {  // a moment in the list passed this frame
+        for (float t : list) if (demoLast < t && demoClock >= t) return true;
+        return false;
+    };
     while (!WindowShouldClose() && !quit) {
         float dt = GetFrameTime();
+        // The demo runs on its own clock (screenshots are slow), in the menu too
+        if (!demoShots.empty()) {
+            dt = 1.0f / 60.0f;
+            demoLast = demoClock;
+            demoClock += dt;
+            for (size_t k = 0; k < demoShots.size(); k++)
+                if (demoAt({ demoShots[k] })) { pendingShot = (int)k; break; }
+            if (demoClock > demoShots.back() + 0.2f) quit = true;
+        }
         if (IsKeyPressed(KEY_F3)) showFps = !showFps;
 
         // ---------- Session lifecycle ----------
@@ -220,7 +267,7 @@ int main(int argc, char** argv) {
         SimPlayer* local = playing ? session->Local() : nullptr;
         Weapon* gunPtr = local ? &local->Current() : nullptr;
         WeaponView* viewModel = nullptr;
-        if (local) viewModel = local->current == WEAPON_RIFLE ? (WeaponView*)rifleView.get() : (WeaponView*)revolverView.get();
+        if (local) viewModel = viewOf(local);
 
         // ---------- Update ----------
         if (playing) {
@@ -239,12 +286,19 @@ int main(int argc, char** argv) {
                 if (GetMouseWheelMove() != 0.0f) in.switchTo = 2;
                 in.switchSpawn = IsKeyPressed(KEY_ENTER);
             }
+            if (!demoShots.empty()) {
+                // The scripted demo: its own trigger finger
+                in.weapon = WeaponInput{};
+                in.weapon.aim = demoClock >= demoAimFrom && demoClock < demoAimTo;
+                in.weapon.firePressed = in.weapon.fireHeld = demoAt(demoFire);
+                in.weapon.reload = demoAt(demoReload);
+            }
             // Offline, pausing stops the world; in a shared game it carries on without you
             if (!(paused && session->Mode() == SessionMode::Offline)) session->Update(dt, in);
             if (session->State() != SessionState::Playing) continue; // ended this frame: back to the menu next frame
             local = session->Local();
             gunPtr = &local->Current();
-            viewModel = local->current == WEAPON_RIFLE ? (WeaponView*)rifleView.get() : (WeaponView*)revolverView.get();
+            viewModel = viewOf(local);
         }
 
         // Names, remembered for the kill feed (even after someone leaves)
@@ -297,15 +351,18 @@ int main(int argc, char** argv) {
                     if (!e.Is(EVENT_ECHO)) {
                         // The shot itself: bang, flash, tracer
                         if (mine) {
-                            if (e.weapon == WEAPON_RIFLE) audio.PlayRifleShot(0.85f, 0.0f);
+                            if (e.weapon == WEAPON_SNIPER) audio.PlaySniperShot(0.95f, 0.0f);
+                            else if (e.weapon == WEAPON_RIFLE) audio.PlayRifleShot(0.85f, 0.0f);
                             else audio.PlayGunshot(0.8f, 0.0f);
-                            feel.punchPitch += e.weapon == WEAPON_RIFLE ? Lerp(1.2f, 0.6f, gun.GetAimAmount()) : Lerp(2.4f, 1.1f, gun.GetAimAmount());
+                            feel.punchPitch += e.weapon == WEAPON_SNIPER ? Lerp(3.2f, 1.6f, gun.GetAimAmount())
+                                             : e.weapon == WEAPON_RIFLE ? Lerp(1.2f, 0.6f, gun.GetAimAmount()) : Lerp(2.4f, 1.1f, gun.GetAimAmount());
                             feel.punchYaw += GetRandomValue(-100, 100) / 100.0f * 0.5f;
                             Fx::GunSmoke(muzzle, local->body.GetLookDirection(), 1.0f);
                             feel.muzzleSmoke = 1.0f;
                             Fx::Tracer(muzzle, e.to, { 255, 220, 160, 140 });
                         } else {
-                            if (e.weapon == WEAPON_RIFLE) audio.PlayRifleShotAt(muzzle, ear, right);
+                            if (e.weapon == WEAPON_SNIPER) audio.PlaySniperShotAt(muzzle, ear, right);
+                            else if (e.weapon == WEAPON_RIFLE) audio.PlayRifleShotAt(muzzle, ear, right);
                             else audio.PlayGunshotAt(muzzle, ear, right);
                             Fx::MuzzleFlash(muzzle, dir);
                             Fx::Tracer(muzzle, e.to, { 255, 210, 140, 255 });
@@ -356,7 +413,7 @@ int main(int argc, char** argv) {
                     }
                     break;
                 case EventType::Killed: {
-                    const char* weapon = e.weapon == WEAPON_RIFLE ? "FAL" : "REVOLVER";
+                    const char* weapon = WeaponName(e.weapon);
                     std::string line = nameOf(e.actor) + "  [" + weapon + "]  " + nameOf(e.target);
                     if (e.Is(EVENT_HEADSHOT)) line += "  -  HEADSHOT";
                     Color c = { 236, 236, 230, 255 };
@@ -427,6 +484,7 @@ int main(int argc, char** argv) {
 
                 // The first-person gun: holstering while switching, its mechanism, its sounds
                 rifleView->holster = local->current == WEAPON_RIFLE ? local->holster : 1.0f;
+                sniperView->holster = local->current == WEAPON_RIFLE ? local->holster : 1.0f;
                 revolverView->holster = local->current == WEAPON_REVOLVER ? local->holster : 1.0f;
                 viewModel->Update(dt, MotionOf(local->body), gun, &cam);
                 ViewModelEvents vmEvents = viewModel->TakeEvents();
@@ -442,10 +500,14 @@ int main(int argc, char** argv) {
                         case ViewSound::MagIn: audio.Play(Sfx::MagIn, 0.85f); break;
                         // The FAL's slap and charging handle are covered by its recorded reload
                         case ViewSound::Slap: case ViewSound::ChargeBack: case ViewSound::ChargeRelease: break;
+                        case ViewSound::BoltOpen: audio.Play(Sfx::BoltOpen, 0.8f); break;
+                        case ViewSound::BoltClose: audio.Play(Sfx::BoltClose, 0.8f); break;
+                        case ViewSound::BoltCloseReload: audio.Play(Sfx::BoltCloseReload, 0.8f); break;
+                        case ViewSound::SniperMagIn: audio.Play(Sfx::SniperMagIn, 0.8f); break;
                     }
                 }
                 for (const ViewModelEvents::Debris& d : vmEvents.debris) {
-                    bool mag = d.kind == DEBRIS_RIFLE_MAG;
+                    bool mag = d.kind == DEBRIS_RIFLE_MAG || d.kind == DEBRIS_SNIPER_MAG;
                     Fx::Casing(d.position, Vector3Add(d.velocity, local->body.GetVelocity()), d.kind,
                                mag ? 0.0136f : (d.kind == DEBRIS_RIFLE_CASE ? 0.006f : 0.0055f), mag);
                 }
@@ -725,6 +787,14 @@ int main(int argc, char** argv) {
                 hs.deathTimer = session->RespawnTimer();
                 hs.hurt = feel.hurt;
                 hs.weapon = local->current == WEAPON_RIFLE ? 0 : 1;
+                hs.weaponNames[0] = WeaponName(local->PrimaryWeapon());
+                {
+                    const WeaponDef& def = gun.GetDef();
+                    float aim = gun.GetAimAmount();
+                    hs.scoped = gun.IsScoped();
+                    // Black as it reaches the eye, clearing onto the view through the glass
+                    if (def.scopeFovy > 0.0f) hs.scopeFade = Clamp(1.0f - fabsf(aim - def.scopeAt) / 0.12f, 0.0f, 1.0f);
+                }
                 hs.ammo = gun.GetAmmo();
                 hs.magazine = gun.GetDef().magazineSize;
                 hs.reloading = gun.IsReloading();
@@ -792,6 +862,10 @@ int main(int argc, char** argv) {
         }
 
         EndDrawing();
+        if (pendingShot >= 0) {
+            TakeScreenshot(TextFormat("demo_%d.png", pendingShot));
+            pendingShot = -1;
+        }
         static int frames = 0;
         if (overview >= 0 && !bench && ++frames == 30) {
             TakeScreenshot(TextFormat("overview_%d.png", overview));

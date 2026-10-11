@@ -11,12 +11,13 @@ mesh 8 torso torso_body
 mesh 9 torso torso_suit
 mesh 10 upperarms upperarms_body
 mesh 11 upperarms upperarms_suit
-# animations: crouch crouch_walk fp_hold fp_rifle idle rest run walk
+# animations: crouch crouch_walk fp_hold fp_rifle fp_sniper idle rest run walk
 # right-hand grip point (palm centre), model space (Y up, facing +Z), meters
 aim_grip -0.0186 1.3616 0.4972
 aim_hand -0.0400 1.3968 0.4456
 fp_grip -0.1676 1.4298 0.5865
 fp_rifle_grip -0.0767 1.4521 0.2273
+fp_sniper_grip -0.0765 1.4987 0.2262
 eye 0.0005 1.6873 0.1366
 # fp_hold frames: 0 hip, 1..90 reload (3.0 s), 91..100 aim; left palm centre per frame (model space)
 fp_left 0 -0.1153 1.4106 0.5116
@@ -252,3 +253,151 @@ fp_rifle_left 127 0.0120 1.5499 0.5216
 fp_rifle_left 128 0.0268 1.5644 0.5233
 fp_rifle_left 129 0.0365 1.5763 0.5236
 fp_rifle_left 130 0.0390 1.5841 0.5228
+# fp_sniper frames: 0 hip, 1..36 working the bolt, 37..136 reload, 137..146 aim
+fp_sniper_left 0 -0.0712 1.5147 0.4939
+fp_sniper_left 1 -0.0712 1.5147 0.4939
+fp_sniper_left 2 -0.0710 1.5154 0.4941
+fp_sniper_left 3 -0.0703 1.5171 0.4944
+fp_sniper_left 4 -0.0694 1.5195 0.4948
+fp_sniper_left 5 -0.0685 1.5219 0.4952
+fp_sniper_left 6 -0.0677 1.5239 0.4955
+fp_sniper_left 7 -0.0674 1.5247 0.4957
+fp_sniper_left 8 -0.0677 1.5240 0.4955
+fp_sniper_left 9 -0.0688 1.5210 0.4950
+fp_sniper_left 10 -0.0709 1.5156 0.4941
+fp_sniper_left 11 -0.0772 1.4995 0.4910
+fp_sniper_left 12 -0.0878 1.4737 0.4859
+fp_sniper_left 13 -0.0956 1.4546 0.4829
+fp_sniper_left 14 -0.0910 1.4497 0.4702
+fp_sniper_left 15 -0.0906 1.4481 0.4684
+fp_sniper_left 16 -0.0902 1.4469 0.4669
+fp_sniper_left 17 -0.0898 1.4460 0.4656
+fp_sniper_left 18 -0.0894 1.4453 0.4647
+fp_sniper_left 19 -0.0892 1.4448 0.4640
+fp_sniper_left 20 -0.0890 1.4445 0.4636
+fp_sniper_left 21 -0.0889 1.4445 0.4635
+fp_sniper_left 22 -0.0890 1.4445 0.4636
+fp_sniper_left 23 -0.0891 1.4447 0.4639
+fp_sniper_left 24 -0.0894 1.4451 0.4645
+fp_sniper_left 25 -0.0897 1.4457 0.4653
+fp_sniper_left 26 -0.0900 1.4465 0.4663
+fp_sniper_left 27 -0.0904 1.4474 0.4676
+fp_sniper_left 28 -0.0908 1.4487 0.4690
+fp_sniper_left 29 -0.0911 1.4501 0.4706
+fp_sniper_left 30 -0.0940 1.4530 0.4783
+fp_sniper_left 31 -0.0934 1.4602 0.4838
+fp_sniper_left 32 -0.0887 1.4715 0.4855
+fp_sniper_left 33 -0.0830 1.4851 0.4881
+fp_sniper_left 34 -0.0774 1.4990 0.4909
+fp_sniper_left 35 -0.0730 1.5101 0.4931
+fp_sniper_left 36 -0.0712 1.5147 0.4939
+fp_sniper_left 37 -0.0713 1.5148 0.4939
+fp_sniper_left 38 -0.0728 1.5119 0.4932
+fp_sniper_left 39 -0.0767 1.5046 0.4913
+fp_sniper_left 40 -0.0819 1.4949 0.4887
+fp_sniper_left 41 -0.0872 1.4843 0.4860
+fp_sniper_left 42 -0.0868 1.4750 0.4740
+fp_sniper_left 43 -0.0882 1.4667 0.4691
+fp_sniper_left 44 -0.0894 1.4594 0.4681
+fp_sniper_left 45 -0.0906 1.4531 0.4698
+fp_sniper_left 46 -0.0912 1.4494 0.4708
+fp_sniper_left 47 -0.0917 1.4464 0.4704
+fp_sniper_left 48 -0.0922 1.4435 0.4688
+fp_sniper_left 49 -0.0925 1.4409 0.4661
+fp_sniper_left 50 -0.0911 1.4392 0.4593
+fp_sniper_left 51 -0.0877 1.4385 0.4489
+fp_sniper_left 52 -0.0830 1.4391 0.4361
+fp_sniper_left 53 -0.0773 1.4407 0.4224
+fp_sniper_left 54 -0.0711 1.4432 0.4092
+fp_sniper_left 55 -0.0648 1.4464 0.3978
+fp_sniper_left 56 -0.0587 1.4500 0.3895
+fp_sniper_left 57 -0.0531 1.4541 0.3858
+fp_sniper_left 58 -0.0480 1.4595 0.3895
+fp_sniper_left 59 -0.0425 1.4698 0.4055
+fp_sniper_left 60 -0.0355 1.4852 0.4272
+fp_sniper_left 61 -0.0273 1.5045 0.4484
+fp_sniper_left 62 -0.0191 1.5241 0.4655
+fp_sniper_left 63 -0.0093 1.5280 0.4808
+fp_sniper_left 64 0.0044 1.5179 0.4958
+fp_sniper_left 65 0.0161 1.5014 0.5066
+fp_sniper_left 66 0.0229 1.4934 0.5124
+fp_sniper_left 67 0.0286 1.4749 0.5102
+fp_sniper_left 68 0.0406 1.4133 0.5004
+fp_sniper_left 69 0.0551 1.3282 0.4863
+fp_sniper_left 70 0.0687 1.2411 0.4715
+fp_sniper_left 71 0.0813 1.1842 0.4467
+fp_sniper_left 72 0.0870 1.1704 0.4304
+fp_sniper_left 73 0.0870 1.1704 0.4304
+fp_sniper_left 74 0.0870 1.1704 0.4304
+fp_sniper_left 75 0.0870 1.1704 0.4304
+fp_sniper_left 76 0.0870 1.1704 0.4304
+fp_sniper_left 77 0.0870 1.1704 0.4304
+fp_sniper_left 78 0.0870 1.1704 0.4304
+fp_sniper_left 79 0.0870 1.1704 0.4304
+fp_sniper_left 80 0.0855 1.1749 0.4357
+fp_sniper_left 81 0.0796 1.1930 0.4567
+fp_sniper_left 82 0.0739 1.2368 0.4722
+fp_sniper_left 83 0.0685 1.2961 0.4834
+fp_sniper_left 84 0.0628 1.3593 0.4953
+fp_sniper_left 85 0.0574 1.4197 0.5067
+fp_sniper_left 86 0.0527 1.4705 0.5163
+fp_sniper_left 87 0.0494 1.5051 0.5227
+fp_sniper_left 88 0.0480 1.5169 0.5249
+fp_sniper_left 89 0.0452 1.5195 0.5230
+fp_sniper_left 90 0.0407 1.5241 0.5200
+fp_sniper_left 91 0.0384 1.5255 0.5186
+fp_sniper_left 92 0.0365 1.5262 0.5173
+fp_sniper_left 93 0.0326 1.5293 0.5147
+fp_sniper_left 94 0.0275 1.5343 0.5112
+fp_sniper_left 95 0.0216 1.5405 0.5071
+fp_sniper_left 96 0.0154 1.5473 0.5027
+fp_sniper_left 97 0.0093 1.5542 0.4982
+fp_sniper_left 98 0.0039 1.5603 0.4941
+fp_sniper_left 99 -0.0005 1.5652 0.4906
+fp_sniper_left 100 -0.0036 1.5679 0.4880
+fp_sniper_left 101 -0.0051 1.5677 0.4865
+fp_sniper_left 102 -0.0047 1.5634 0.4866
+fp_sniper_left 103 -0.0034 1.5568 0.4873
+fp_sniper_left 104 -0.0032 1.5520 0.4872
+fp_sniper_left 105 -0.0092 1.5477 0.4906
+fp_sniper_left 106 -0.0232 1.5394 0.4988
+fp_sniper_left 107 -0.0459 1.5275 0.5164
+fp_sniper_left 108 -0.0608 1.5080 0.5051
+fp_sniper_left 109 -0.0737 1.4871 0.4935
+fp_sniper_left 110 -0.0868 1.4659 0.4874
+fp_sniper_left 111 -0.0914 1.4519 0.4742
+fp_sniper_left 112 -0.0921 1.4458 0.4657
+fp_sniper_left 113 -0.0931 1.4413 0.4608
+fp_sniper_left 114 -0.0937 1.4382 0.4578
+fp_sniper_left 115 -0.0940 1.4363 0.4565
+fp_sniper_left 116 -0.0941 1.4355 0.4564
+fp_sniper_left 117 -0.0940 1.4355 0.4575
+fp_sniper_left 118 -0.0937 1.4363 0.4594
+fp_sniper_left 119 -0.0934 1.4377 0.4617
+fp_sniper_left 120 -0.0930 1.4395 0.4643
+fp_sniper_left 121 -0.0926 1.4418 0.4668
+fp_sniper_left 122 -0.0921 1.4442 0.4689
+fp_sniper_left 123 -0.0916 1.4468 0.4703
+fp_sniper_left 124 -0.0912 1.4493 0.4708
+fp_sniper_left 125 -0.0910 1.4517 0.4709
+fp_sniper_left 126 -0.0933 1.4540 0.4775
+fp_sniper_left 127 -0.0941 1.4574 0.4837
+fp_sniper_left 128 -0.0908 1.4627 0.4848
+fp_sniper_left 129 -0.0870 1.4692 0.4863
+fp_sniper_left 130 -0.0829 1.4768 0.4882
+fp_sniper_left 131 -0.0789 1.4852 0.4901
+fp_sniper_left 132 -0.0755 1.4937 0.4917
+fp_sniper_left 133 -0.0733 1.5018 0.4928
+fp_sniper_left 134 -0.0721 1.5084 0.4935
+fp_sniper_left 135 -0.0715 1.5130 0.4938
+fp_sniper_left 136 -0.0712 1.5147 0.4939
+fp_sniper_left 137 -0.0712 1.5147 0.4939
+fp_sniper_left 138 -0.0696 1.5132 0.4952
+fp_sniper_left 139 -0.0609 1.5164 0.4993
+fp_sniper_left 140 -0.0432 1.5228 0.4943
+fp_sniper_left 141 -0.0249 1.5323 0.4957
+fp_sniper_left 142 -0.0066 1.5440 0.4990
+fp_sniper_left 143 0.0107 1.5564 0.5018
+fp_sniper_left 144 0.0250 1.5683 0.5031
+fp_sniper_left 145 0.0347 1.5782 0.5020
+fp_sniper_left 146 0.0378 1.5847 0.4974

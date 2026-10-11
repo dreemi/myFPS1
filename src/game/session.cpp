@@ -25,7 +25,7 @@ Session::Session(SessionMode m, const SessionConfig& cfg) : mode(m), config(cfg)
     world = BuildMap(config.map);
     haveWorld = true;
     sim = std::make_unique<GameSim>(world, config.bots, (unsigned)GetRandomValue(1, 1 << 30));
-    local = sim->AddPlayer(config.name);
+    local = sim->AddPlayer(config.name, config.playerClass);
     localId = local->id;
     if (mode == SessionMode::Host) {
         transport = std::make_unique<Net::Transport>();
@@ -227,7 +227,7 @@ void Session::HostReceive() {
                 continue;
             }
             std::string name = h.name.empty() ? "Player" : h.name.substr(0, 16);
-            SimPlayer* p = sim->AddPlayer(name);
+            SimPlayer* p = sim->AddPlayer(name, h.playerClass);
             if (!p) {
                 transport->Send(e.peer, EncodeReject("The game is full"), true);
                 transport->Disconnect(e.peer);
@@ -295,7 +295,7 @@ void Session::ClientReceive() {
     for (Net::TransportEvent& e : evs) {
         if (e.type == Net::TransportEvent::Connected) {
             status = "Connected, joining...";
-            transport->Send(0, EncodeHello({ VERSION, config.name }), true);
+            transport->Send(0, EncodeHello({ VERSION, config.name, (uint8_t)config.playerClass }), true);
             continue;
         }
         if (e.type == Net::TransportEvent::Disconnected) {
@@ -320,6 +320,7 @@ void Session::ClientReceive() {
             localId = w.id;
             predicted = std::make_unique<SimPlayer>(localId, config.name, (unsigned)GetRandomValue(1, 1 << 30));
             local = predicted.get();
+            local->SetClass(config.playerClass);
             clock = w.time;
             state = SessionState::Playing;
             status = "Connected to " + config.address + ":" + std::to_string(config.port);
@@ -363,7 +364,7 @@ void Session::ClientReceive() {
                     // The answer to a shot we've already shown: only what it hit is news
                     g.flags |= EVENT_ECHO;
                     if (g.hit == HitKind::Player || g.hit == HitKind::Bot)
-                        local->Gun(g.weapon).RegisterHit(g.Is(EVENT_KILLED), g.Is(EVENT_HEADSHOT));
+                        local->Gun(SlotOfWeapon(g.weapon)).RegisterHit(g.Is(EVENT_KILLED), g.Is(EVENT_HEADSHOT));
                 }
                 pending.push_back(g);
             }
@@ -393,7 +394,7 @@ void Session::ClientPredict(float dt, const LocalInput& in) {
         GameEvent g;
         g.type = EventType::Shot;
         g.actor = localId;
-        g.weapon = (uint8_t)local->current;
+        g.weapon = (uint8_t)local->CurrentWeapon();
         g.hit = h.hit ? HitKind::World : HitKind::None;
         g.from = r.position;
         g.to = Vector3Add(r.position, Vector3Scale(r.direction, h.distance > 149.0f ? 80.0f : h.distance));
