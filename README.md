@@ -11,7 +11,7 @@ Run `build/fps.exe` (assets are copied next to it on every build). CMake downloa
 
 ## Playing
 
-The main menu has three choices, a **map** picker (it applies to playing offline and hosting; joining plays the host's map) and a **class** picker (see Classes):
+The main menu has three choices, a **map** picker (it applies to playing offline and hosting; joining plays the host's map), a **class** picker (see Classes) and a **look** picker: **Civilian** or **Soldier** (woodland fatigues, load vest, gloves). The look is how everyone, bots and players, is drawn on your screen; it doesn't change the game for anyone else.
 
 - **Play Offline**: you and the bots, nothing on the network.
 - **Host Game**: starts a game on this PC that you play in. Friends join it. Pick the UDP port (default **27015**) and the number of bots (0–6). While hosting, the top-left corner shows the port and this PC's LAN addresses.
@@ -24,8 +24,9 @@ From the command line:
     fps.exe --host [port] --bots 2 --name Ann --map redoubt
     fps.exe --join 192.168.1.20:27015 --name Bob
     fps.exe --offline --map oldtown --class sniper
+    fps.exe --offline --map parkside --look soldier
 
-The name, address, port, bots, map and class you last used are saved in `dustyard.cfg` next to the exe.
+The name, address, port, bots, map, class and look you last used are saved in `dustyard.cfg` next to the exe.
 
 ## Classes
 

@@ -36,7 +36,12 @@ struct CharacterAssets {
     bool loaded = false;
 };
 
-bool LoadCharacter(CharacterAssets& c, const std::string& assetDir);
+// The models to choose from: the same body, skeleton and animations, dressed differently
+const int CHARACTER_MODELS = 2;
+const char* CharacterModelName(int model);   // "CIVILIAN", "SOLDIER"
+
+// Loads assets/models/character (model 0) or assets/models/soldier (model 1)
+bool LoadCharacter(CharacterAssets& c, const std::string& assetDir, int model = 0);
 void UnloadCharacter(CharacterAssets& c);
 
 // Animation frame for a looping phase (0..1)

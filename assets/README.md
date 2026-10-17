@@ -16,6 +16,7 @@ Copied next to the game executable on every build (see CMakeLists.txt).
 | `models/fal/fal.glb`, `fal.txt`, `fal_wood_*.png` | built by `tools/make_fal.py` (made for this project) | The FN FAL (T48 pattern): receiver, bolt, charging handle, trigger, magazine, 7.62 rounds and cases |
 | `models/l42/l42.glb`, `l42.txt` | built by `tools/make_l42.py` (made for this project) | The Enfield L42A1: receiver with stock, heavy barrel and the telescope on its mount; the bolt, trigger and 10-round magazine (its rounds and cases are the FAL's) |
 | `models/character/character.glb`, `character.txt` | `civil+man+blend.rar` (Citizen.blend), converted by `tools/export_character.py` | The enemy, your own body (legs) and your first-person arms |
+| `models/soldier/character.glb`, `character.txt` | the same `Citizen.blend`, dressed by `tools/soldier_outfit.py` (run through `tools/export_character.py ... soldier`). The vest, pouches, camouflage, glove and webbing textures are made for this project; the base mesh and its clothing textures are MakeHuman assets (the suit texture carries MakeHuman's CC0 mark) | The **Soldier** look (menu: LOOK): woodland fatigues, load vest with magazine pouches, side and radio pouches, black gloves and boots. Same skeleton, animations and grip points as the character, so it plays identically |
 | `sounds/gunshot.mp3` | `freesound_community-single-pistol-gunshot-33-37187.mp3` | Every shot (yours, and the enemy's by distance and direction) |
 | `sounds/reload.mp3` | `freesound_community-clean-revolver-reload-6889.mp3` | Reloading (cut into its clicks at load, see below) |
 | `sounds/walk.mp3` | `freesound_community-walking-96582.mp3` | Footsteps: walking (and quieter/slower crouch-walking) |
@@ -70,3 +71,7 @@ from empty, aiming. fp_sniper holds the L42A1: the right hand working the bolt a
 the reload (bolt open, magazine changed, bolt closed), aiming. To regenerate after editing the script (Blender 4.x):
 
     blender --background --disable-autoexec Citizen.blend --python tools/export_character.py -- <Citizen textures dir> assets/models/character
+
+The Soldier look is the same export with `soldier` added; `tools/soldier_outfit.py` recolours the jacket and jeans into woodland camouflage (keeping the seams and folds as shading), blackens the shoes and hands, and adds the vest and pouches before the meshes are split:
+
+    blender --background --disable-autoexec Citizen.blend --python tools/export_character.py -- <Citizen textures dir> assets/models/soldier soldier

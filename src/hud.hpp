@@ -81,9 +81,10 @@ struct MenuFields {
     int bots = 1;
     int map = 0;                  // MapId, for hosting and playing offline
     int playerClass = 0;          // PlayerClass: the loadout
+    int character = 0;            // the character model everyone is drawn with (CharacterModelName)
     int focus = -1;               // which text field has the keyboard
 };
-enum class MenuAction { None, Offline, Host, Join, Cancel, Quit, MapChanged };
+enum class MenuAction { None, Offline, Host, Join, Cancel, Quit, MapChanged, CharacterChanged };
 struct MenuStatus {
     std::string text;             // what's happening (or what went wrong)
     bool busy = false;            // connecting: offer Cancel instead of the buttons

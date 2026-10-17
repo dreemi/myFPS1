@@ -7,8 +7,13 @@
 static const char* ANIM_NAMES[(int)CharAnim::Count] = { "idle", "walk", "run", "crouch", "crouch_walk", "fp_hold", "rest",
                                                          "fp_rifle", "fp_sniper" };
 
-bool LoadCharacter(CharacterAssets& c, const std::string& assetDir) {
-    std::string dir = assetDir + "models/character/";
+static const char* MODEL_DIRS[CHARACTER_MODELS] = { "character", "soldier" };
+static const char* MODEL_NAMES[CHARACTER_MODELS] = { "CIVILIAN", "SOLDIER" };
+
+const char* CharacterModelName(int model) { return MODEL_NAMES[(unsigned)model % CHARACTER_MODELS]; }
+
+bool LoadCharacter(CharacterAssets& c, const std::string& assetDir, int model) {
+    std::string dir = assetDir + "models/" + MODEL_DIRS[(unsigned)model % CHARACTER_MODELS] + "/";
     c.model = LoadModel((dir + "character.glb").c_str());
     if (c.model.meshCount == 0) {
         TraceLog(LOG_WARNING, "CHARACTER: model missing from %s", dir.c_str());

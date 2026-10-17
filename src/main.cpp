@@ -41,6 +41,7 @@ static void LoadSettings(Hud::MenuFields& f) {
         else if (key == "port") f.port = value;
         else if (key == "bots") f.bots = std::clamp(atoi(value.c_str()), 0, 6);
         else if (key == "class") f.playerClass = value == ClassName(CLASS_SNIPER) ? CLASS_SNIPER : CLASS_STANDARD;
+        else if (key == "look") { for (int m = 0; m < CHARACTER_MODELS; m++) if (value == CharacterModelName(m)) f.character = m; }
         else if (key == "map") {
             for (int m = 0; m < (int)MapId::Count; m++)
                 if (value == MapName((MapId)m)) f.map = m;
@@ -55,7 +56,8 @@ static void SaveSettings(const Hud::MenuFields& f) {
         return s.empty() ? std::string("-") : s;
     };
     out << "name " << safe(f.name) << "\naddress " << safe(f.address) << "\nport " << safe(f.port) << "\nbots " << f.bots
-        << "\nmap " << MapName((MapId)f.map) << "\nclass " << ClassName(f.playerClass) << "\n";
+        << "\nmap " << MapName((MapId)f.map) << "\nclass " << ClassName(f.playerClass)
+        << "\nlook " << CharacterModelName(f.character) << "\n";
 }
 
 // Presentation state that belongs to one session (reset when a new one starts)
@@ -79,7 +81,7 @@ struct Feel {
 
 int main(int argc, char** argv) {
     // Command line: --overview N (debug render), --host [port], --join address[:port],
-    // --offline, --name NAME, --bots N, --map redoubt|dustyard|oldtown, --class standard|sniper
+    // --offline, --name NAME, --bots N, --map redoubt|dustyard|oldtown, --class standard|sniper, --look civilian|soldier
     int overview = -1;
     bool bench = false;   // with --overview: time 300 frames without vsync instead of a screenshot
     Hud::MenuFields fields;
@@ -124,6 +126,11 @@ int main(int argc, char** argv) {
             for (char& ch : c) ch = (char)toupper(ch);
             fields.playerClass = c == ClassName(CLASS_SNIPER) ? CLASS_SNIPER : CLASS_STANDARD;
         }
+        else if (a == "--look" && hasNext) {
+            std::string look = argv[++i];
+            for (char& ch : look) ch = (char)toupper(ch);
+            for (int m = 0; m < CHARACTER_MODELS; m++) if (look == CharacterModelName(m)) fields.character = m;
+        }
         else if (a == "--map" && hasNext) {
             std::string name = argv[++i];
             for (char& c : name) c = (char)toupper(c);
@@ -144,7 +151,7 @@ int main(int argc, char** argv) {
     GameAudio audio;
     audio.Load(assetDir);
     CharacterAssets character; // everyone's body, your own legs, and your first-person arms
-    LoadCharacter(character, assetDir);
+    LoadCharacter(character, assetDir, fields.character);
 
     // The map: the one chosen in the menu (shown behind it), or the session's
     World menuWorld = BuildMap((MapId)fields.map);
@@ -856,6 +863,16 @@ int main(int argc, char** argv) {
                     case Hud::MenuAction::MapChanged:
                         menuWorld = BuildMap((MapId)fields.map);
                         worldSerial++;
+                        SaveSettings(fields);
+                        break;
+                    case Hud::MenuAction::CharacterChanged:
+                        // Same skeleton and animations, so only the model itself changes
+                        UnloadHelmet();
+                        Render::DetachLitShader(character.model);
+                        UnloadCharacter(character);
+                        LoadCharacter(character, assetDir, fields.character);
+                        Render::ApplyLitShader(character.model);
+                        InitHelmet(&character);
                         SaveSettings(fields);
                         break;
                     default: break;

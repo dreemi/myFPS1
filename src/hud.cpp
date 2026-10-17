@@ -1,5 +1,6 @@
 #include "hud.hpp"
 #include "world.hpp"
+#include "character.hpp"
 #include "raymath.h"
 #include <cmath>
 
@@ -428,6 +429,19 @@ MenuAction MainMenu(int screenW, int screenH, MenuFields& f, const MenuStatus& s
     Text(ClassName(f.playerClass), lx + 111, panel.y + 147, 24, TEXT, CENTER);
     if (Button({ lx + 184, panel.y + 140, 38, 38 }, ">")) f.playerClass = (f.playerClass + 1) % CLASS_COUNT;
     Text(CLASS_BLURBS[f.playerClass % CLASS_COUNT], lx, panel.y + 181, 14, DIM);
+
+    // The look: which character model everyone is drawn with (on this screen)
+    float rx = panel.x + 450;
+    Text("LOOK", rx - 10, panel.y + 149, 18, DIM, RIGHT);
+    if (Button({ rx, panel.y + 140, 38, 38 }, "<")) {
+        f.character = (f.character + CHARACTER_MODELS - 1) % CHARACTER_MODELS;
+        action = MenuAction::CharacterChanged;
+    }
+    Text(CharacterModelName(f.character), rx + 91, panel.y + 149, 20, TEXT, CENTER);
+    if (Button({ rx + 144, panel.y + 140, 38, 38 }, ">")) {
+        f.character = (f.character + 1) % CHARACTER_MODELS;
+        action = MenuAction::CharacterChanged;
+    }
 
     // Play alone
     if (Button({ panel.x + 430, panel.y + 20, 200, 46 }, "PLAY OFFLINE")) action = MenuAction::Offline;

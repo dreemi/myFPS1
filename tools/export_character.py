@@ -2,7 +2,7 @@
 Converts the "civil man" character (Citizen.blend) into assets/models/character/.
 
 Run with Blender 4.x (embedded scripts disabled):
-  blender --background --disable-autoexec Citizen.blend --python tools/export_character.py -- <textures dir> <output dir>
+  blender --background --disable-autoexec Citizen.blend --python tools/export_character.py -- <textures dir> <output dir> [soldier]
 
 What it does:
   - removes the teeth/tongue meshes, camera and lamp
@@ -23,6 +23,7 @@ from mathutils import Vector, Matrix, Quaternion
 
 args = sys.argv[sys.argv.index("--") + 1:]
 TEX_DIR, OUT_DIR = args[0], args[1]
+SOLDIER = len(args) > 2 and args[2] == "soldier"  # dressed as a soldier (tools/soldier_outfit.py)
 HEIGHT = 1.8
 TEX_SIZE = 1024
 FPS = 24
@@ -195,6 +196,11 @@ def split(obj, label, force=None):
 
 
 parts = []
+if SOLDIER:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import soldier_outfit
+    for name, label, force in soldier_outfit.dress(arm):
+        parts += split(bpy.data.objects[name], label, force=force)
 parts += split(bpy.data.objects["citizen_fbxMesh"], "body")
 parts += split(bpy.data.objects["male_casualsuit05Mesh"], "suit")
 parts += split(bpy.data.objects["shoes03Mesh"], "shoes", force="legs")
